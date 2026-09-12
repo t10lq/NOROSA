@@ -129,8 +129,8 @@ const ONE_TIME_LOW_WATER = 8
 /**
  * IdbStore key prefix for committed ("first-seen") safety numbers. Keyed by
  * the peer's IDENTITY key — the stable anchor that survives reconnects —
- * never by the ephemeral per-connection alias. Purged by resetVault() like
- * everything else on this device.
+ * never by the ephemeral per-connection alias. Wiped with everything else on
+ * this device when IdbStore is cleared (see vault.openDeviceKey()).
  */
 const SAFETY_PREFIX = 'safety:'
 

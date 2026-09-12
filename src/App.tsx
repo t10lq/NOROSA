@@ -39,7 +39,6 @@ function generateAlias(): string {
 
 // ── Types ─────────────────────────────────────────────────────────
 type View = 'lobby' | 'room'
-type Alert = 'recording' | 'screenshot' | null
 
 interface Participant {
   id: string; alias: string; muted: boolean; videoOff: boolean; speaking: boolean
@@ -69,7 +68,7 @@ const SharePath = '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8"
 const ChatPath = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="13" y2="13"/>'
 const ShieldPath = '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'
 const ExitPath = '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'
-const WarnPath = '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>'
+
 const SlashPath = '<line x1="4" y1="4" x2="20" y2="20" stroke="#B3241F" stroke-width="1.5"/>'
 const CopyPath = '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'
 const CheckPath = '<polyline points="20 6 9 17 4 12"/>'
@@ -229,27 +228,7 @@ function Btn({ onClick, active = true, danger = false, title, pending = false, c
   )
 }
 
-// ── Alert banner ──────────────────────────────────────────────────
-function AlertBanner({ type, onDismiss }: { type: Alert; onDismiss: () => void }) {
-  if (!type) return null
-  const msg = type === 'recording' ? 'Screen recording detected in this session' : 'Screenshot captured — possible leak'
-  return (
-    <div style={{
-      position: 'fixed', top: 28, left: '50%', transform: 'translateX(-50%)', zIndex: 100,
-      background: 'rgba(12,12,14,0.95)', border: '1px solid rgba(179,36,31,0.5)',
-      borderRadius: 10, padding: '13px 20px',
-      display: 'flex', alignItems: 'center', gap: 12,
-      backdropFilter: 'blur(20px)',
-      animation: 'slideDown 0.24s cubic-bezier(0.4,0,0.2,1)',
-      boxShadow: '0 8px 40px rgba(0,0,0,0.6)',
-      maxWidth: 460,
-    }}>
-      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#B3241F" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: WarnPath }} />
-      <span style={{ color: '#B3241F', fontSize: 13, fontFamily: "'Space Mono'", letterSpacing: '0.04em' }}>{msg}</span>
-      <button onClick={onDismiss} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: '#5C5C63', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
-    </div>
-  )
-}
+
 
 // ── Exit confirm ──────────────────────────────────────────────────
 function ExitConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {
@@ -605,7 +584,6 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
   const calls = useCalls()
   const [sharing, setSharing] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
-  const [alert, setAlert] = useState<Alert>(null)
   const [showExit, setShowExit] = useState(false)
   const [ctrlVis, setCtrlVis] = useState(true)
   const [copied, setCopied] = useState(false)
@@ -788,7 +766,6 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
     <div style={{ height: '100%', display: 'flex', background: '#0A0A0B', position: 'relative', overflow: 'hidden' }}
       onMouseMove={nudge}>
 
-      <AlertBanner type={alert} onDismiss={() => setAlert(null)} />
       {!calls.supported && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 90,
@@ -823,7 +800,6 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
           SECOND TAB OF THIS BROWSER DETECTED — SAME IDENTITY, MEDIA BETWEEN THEM STAYS BLACK
         </div>
       )}
-      {alert && <div style={{ position: 'fixed', inset: 0, pointerEvents: 'none', border: '2px solid #B3241F', zIndex: 80, borderRadius: 0, animation: 'flashBorder 0.7s ease', opacity: 0 }} />}
       {showExit && <ExitConfirm onConfirm={onExit} onCancel={() => setShowExit(false)} />}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)}
         input={mediaDevices.input} output={mediaDevices.output} camera={mediaDevices.camera}
@@ -993,11 +969,9 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
       )}
 
       <style>{`
-        @keyframes slideDown { from { opacity:0; transform:translateX(-50%) translateY(-10px) } to { opacity:1; transform:translateX(-50%) translateY(0) } }
         @keyframes slideInRight { from { opacity:0; transform:translateX(20px) } to { opacity:1; transform:translateX(0) } }
         @keyframes fadeIn { from { opacity:0 } to { opacity:1 } }
         @keyframes scaleIn { from { opacity:0; transform:scale(0.95) } to { opacity:1; transform:scale(1) } }
-        @keyframes flashBorder { 0%{opacity:0} 20%{opacity:1} 100%{opacity:0} }
         @keyframes breathe { 0%,100%{opacity:0.3} 50%{opacity:0.9} }
       `}</style>
     </div>
