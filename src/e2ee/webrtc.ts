@@ -605,19 +605,41 @@ export class MediaCallClient {
     this.micTrack?.stop()
     this.micTrack = null
     this.micDeviceId = deviceId
-    try {
-      const s = await this.withTimeout('getUserMedia-mic', navigator.mediaDevices.getUserMedia({
-        audio: deviceId
-          ? { deviceId: { exact: deviceId } }
-          : { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      }))
-      this.micTrack = s.getAudioTracks()[0]!
-      return this.micTrack
-    } catch (err) {
-      console.warn('[media] mic unavailable:', err instanceof Error ? err.message : err)
-      this.events.onMicError?.(err instanceof Error ? err.message : String(err))
+
+    // Some engines reject rich boolean constraints (echoCancellation etc.)
+    // with a TypeError "Invalid constraint" — that is NOT a permission denial,
+    // so "allow access" can never fix it. Mirror the camera path: try the full
+    // audience first, then retry with NO constraints (bare capture) which only
+    // fails on a genuine permission/hardware problem.
+    let stream: MediaStream | null = null
+    let lastErr = 'unknown failure'
+    {
+      const preferred = deviceId
+        ? { deviceId: { exact: deviceId } }
+        : { echoCancellation: true, noiseSuppression: true, autoGainControl: true }
+      try {
+        stream = await this.withTimeout('getUserMedia-mic', navigator.mediaDevices.getUserMedia({ audio: preferred }))
+      } catch (err) {
+        lastErr = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+        console.warn('[media] mic request failed, retrying bare:', lastErr)
+      }
+    }
+    if (!stream || !stream.getAudioTracks()[0]) {
+      try {
+        stream = await this.withTimeout('getUserMedia-mic-bare', navigator.mediaDevices.getUserMedia({
+          audio: deviceId ? { deviceId: { exact: deviceId } } : true,
+        }))
+      } catch (err) {
+        lastErr = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
+      }
+    }
+    if (!stream || !stream.getAudioTracks()[0]) {
+      console.warn('[media] mic unavailable:', lastErr)
+      this.events.onMicError?.(lastErr)
       throw new Error('Microphone unavailable.')
     }
+    this.micTrack = stream.getAudioTracks()[0]!
+    return this.micTrack
   }
 
   private async ensureCam(deviceId: string | null): Promise<MediaStreamTrack> {

@@ -705,7 +705,15 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
       try {
         ;(await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true }, video: false })).getTracks().forEach(t => t.stop())
         audioOk = true
-      } catch {}
+      } catch {
+        // Rich constraints can fail with "Invalid constraint" on some engines.
+        // A bare request is the real permission probe — try it before declaring
+        // the mic blocked.
+        try {
+          ;(await navigator.mediaDevices.getUserMedia({ audio: true, video: false })).getTracks().forEach(t => t.stop())
+          audioOk = true
+        } catch {}
+      }
       const all = (await navigator.mediaDevices?.enumerateDevices?.()) ?? []
       if (!cancelled) {
         setMediaDevices({
@@ -731,11 +739,13 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
   const selectInput = (id: string) => {
     setSelIn(id)
     if (id === 'default') { setMicHint('idle'); return }
-    navigator.mediaDevices?.getUserMedia({ audio: { deviceId: { exact: id } } })
+    const exact = navigator.mediaDevices?.getUserMedia({ audio: { deviceId: { exact: id } }, video: false })
+    if (!exact) { setMicHint('blocked'); return }
+    exact
+      .catch(() => navigator.mediaDevices!.getUserMedia({ audio: { deviceId: { ideal: id } }, video: false }))
       .then(ms => {
         ms.getTracks().forEach(t => t.stop())
         setMicHint('ready')
-        // If we are unmuted and live, switch the shared track immediately.
         calls.reconfigureDevices(id, null)
       })
       .catch(() => setMicHint('blocked'))
@@ -744,7 +754,10 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
   const selectCamera = (id: string) => {
     setSelCam(id)
     if (id === 'default') { setCamHint('idle'); return }
-    navigator.mediaDevices?.getUserMedia({ video: { deviceId: { exact: id } } })
+    const exact = navigator.mediaDevices?.getUserMedia({ video: { deviceId: { exact: id } }, audio: false })
+    if (!exact) { setCamHint('blocked'); return }
+    exact
+      .catch(() => navigator.mediaDevices!.getUserMedia({ video: { deviceId: { ideal: id } }, audio: false }))
       .then(ms => {
         ms.getTracks().forEach(t => t.stop())
         setCamHint('ready')
