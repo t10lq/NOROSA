@@ -6,7 +6,7 @@ import { RoomReceiver } from './components/RoomReceiver'
 import { E2eProvider, useE2e } from './context/E2eContext'
 import { CallProvider, useCalls } from './context/CallContext'
 import { getChatPeers, subscribeRoomChat } from './components/roomChat'
-import { createVault, hasVault, resetVault, unlockVault } from './e2ee/vault'
+import { openDeviceKey } from './e2ee/vault'
 import { formatRoomCode, generateRoomCode, hashRoomCode, isValidCode, normalizeRoomCode } from './e2ee/roomcode'
 import { SpeakerRouter } from './e2ee/speakerRouter'
 
@@ -455,15 +455,12 @@ function SettingsModal({ open, onClose, input, output, camera, selIn, selOut, se
 }
 
 // ── Lobby ─────────────────────────────────────────────────────────
-function Lobby({ alias, onCreateRoom, onJoinRoom, vaultExists, unlocked, busy, pwdError, onUnlock, resetting, onReset }: {
+function Lobby({ alias, onCreateRoom, onJoinRoom }: {
   alias: string; onCreateRoom: () => void; onJoinRoom: (code: string) => void
-  vaultExists: boolean; unlocked: boolean; busy: boolean; pwdError: string | null; onUnlock: (pass: string) => void
-  resetting: boolean; onReset: () => void
 }) {
   const [joinCode, setJoinCode] = useState('')
   const [mode, setMode] = useState<'choose' | 'join'>('choose')
-  const [pass, setPass] = useState('')
-  const [confirmReset, setConfirmReset] = useState(false)
+  const isMobile = useMediaQuery('(max-width: 700px)')
 
   // A valid code is EXACTLY 18 hex digits (6 groups of 3). Anything else —
   // pasted plans, empty, too short, stray letters — is refused right here so
@@ -478,19 +475,19 @@ function Lobby({ alias, onCreateRoom, onJoinRoom, vaultExists, unlocked, busy, p
   return (
     <div style={{
       minHeight: '100%', display: 'flex', flexDirection: 'column',
-      alignItems: 'center', justifyContent: 'center', padding: '55px 21px',
+      alignItems: 'center', justifyContent: 'center', padding: isMobile ? '36px 16px' : '55px 21px',
     }}>
       {/* Brand */}
-      <div style={{ textAlign: 'center', marginBottom: 62 }}>
-        <div className="hlog-settle" style={{ marginBottom: 26 }}>
-          <HedgehogLogo size={92} />
+      <div style={{ textAlign: 'center', marginBottom: isMobile ? 36 : 62 }}>
+        <div className="hlog-settle" style={{ marginBottom: isMobile ? 22 : 26 }}>
+          <HedgehogLogo size={isMobile ? 72 : 92} />
         </div>
         <h1 style={{
-          fontFamily: "'Space Mono'", fontSize: 36, fontWeight: 700,
+          fontFamily: "'Space Mono'", fontSize: isMobile ? 30 : 36, fontWeight: 700,
           letterSpacing: '0.22em', color: '#F0EEE9', margin: '0 0 14px',
         }}>Norosa</h1>
         <p style={{
-          fontFamily: 'Outfit', fontSize: 14, color: '#4A4A52',
+          fontFamily: 'Outfit', fontSize: isMobile ? 13 : 14, color: '#4A4A52',
           fontWeight: 400, letterSpacing: '0.04em', margin: 0,
         }}>The server only knocks. It never listens.</p>
       </div>
@@ -500,12 +497,12 @@ function Lobby({ alias, onCreateRoom, onJoinRoom, vaultExists, unlocked, busy, p
         width: '100%', maxWidth: 420,
         background: 'rgba(17,17,19,0.8)',
         border: '1px solid rgba(255,255,255,0.10)',
-        borderRadius: 16, padding: 34, marginBottom: 24,
+        borderRadius: 16, padding: isMobile ? 24 : 34, marginBottom: 24,
         backdropFilter: 'blur(20px)',
         boxShadow: '0 24px 64px rgba(0,0,0,0.5)',
       }}>
         {/* Identity — read only */}
-        <div style={{ marginBottom: 28 }}>
+        <div style={{ marginBottom: isMobile ? 22 : 28 }}>
           <label style={{
             display: 'block', fontFamily: "'Space Mono'", fontSize: '10px',
             letterSpacing: '0.12em', color: '#3A3A3F', marginBottom: 10,
@@ -522,101 +519,34 @@ function Lobby({ alias, onCreateRoom, onJoinRoom, vaultExists, unlocked, busy, p
           </p>
         </div>
 
-        {/* Device vault — the pickle key only exists after a passphrase */}
-        <div style={{ marginBottom: 22 }}>
-          <label style={{
-            display: 'block', fontFamily: "'Space Mono'", fontSize: '10px',
-            letterSpacing: '0.12em', color: '#3A3A3F', marginBottom: 10,
-          }}>
-            {vaultExists ? 'DEVICE LOCKED — ENTER PASSPHRASE' : 'CREATE DEVICE PASSPHRASE'}
-          </label>
-          <input
-            type="password" value={pass}
-            onChange={e => setPass(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && pass && !busy && onUnlock(pass)}
-            autoComplete="off"
-            placeholder={unlocked ? '· · · · · · · ·' : vaultExists ? 'Passphrase' : 'Choose a passphrase'}
-            style={{
-              width: '100%', padding: '12px 16px', marginBottom: 8,
-              background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
-              borderRadius: 8, color: '#F0EEE9', fontSize: 14, outline: 'none',
-              fontFamily: 'Outfit', transition: 'border-color 0.2s',
-            }}
-            onFocus={e => (e.target.style.borderColor = 'rgba(255,255,255,0.22)')}
-            onBlur={e => (e.target.style.borderColor = 'rgba(255,255,255,0.08)')}
-          />
-          {unlocked ? (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#3F8F5F" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-              <span style={{ fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.08em', color: 'rgba(240,238,233,0.35)' }}>DEVICE UNLOCKED</span>
-            </div>
-          ) : (
-            <button onClick={() => !busy && onUnlock(pass)} style={{
-              width: '100%', padding: '11px', background: busy ? 'rgba(240,238,233,0.04)' : 'rgba(240,238,233,0.08)',
-              border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8,
-              color: '#F0EEE9', fontSize: 13, fontFamily: 'Outfit', fontWeight: 500,
-              cursor: busy ? 'wait' : 'pointer', transition: 'all 0.18s',
-            }}
-              onMouseEnter={e => { if (!busy) e.currentTarget.style.background = 'rgba(240,238,233,0.14)' }}
-              onMouseLeave={e => { e.currentTarget.style.background = 'rgba(240,238,233,0.08)' }}
-            >{busy ? 'Deriving key…' : vaultExists ? 'Unlock device' : 'Set passphrase & unlock'}</button>
-          )}
-          {pwdError && (
-            <p style={{ margin: '8px 0 0', fontSize: 11, color: '#B3241F', fontWeight: 400 }}>{pwdError}</p>
-          )}
-          {!unlocked && (
-            confirmReset ? (
-              <button onClick={onReset} disabled={resetting} style={{
-                width: '100%', padding: '9px', marginTop: 10,
-                background: resetting ? 'rgba(240,238,233,0.04)' : 'rgba(179,36,31,0.08)',
-                border: '1px solid rgba(179,36,31,0.35)', borderRadius: 8,
-                color: '#B3241F', fontSize: 12, fontFamily: 'Outfit',
-                cursor: resetting ? 'wait' : 'pointer',
-              }}>{resetting ? 'Resetting…' : 'Confirm — erase identity & start over'}</button>
-            ) : (
-              <button onClick={() => setConfirmReset(true)} style={{
-                width: '100%', padding: '9px', marginTop: 10,
-                background: 'none', border: '1px dashed rgba(179,36,31,0.3)', borderRadius: 8,
-                color: '#7A2623', fontSize: 12, fontFamily: 'Outfit',
-                cursor: 'pointer',
-              }}>Forgot passphrase? Reset this device</button>
-            )
-          )}
-          <p style={{ margin: '8px 0 0', fontSize: 11, color: '#2E2E35', fontWeight: 400 }}>
-            {vaultExists
-              ? 'A copy of this device is useless without the passphrase — it never leaves your browser, nor the server.'
-              : 'Derived only here (PBKDF2 × 600k + AES-GCM). It never leaves your browser, nor the server.'}
-          </p>
-        </div>
-
         {mode === 'choose' ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <button onClick={onCreateRoom} disabled={!unlocked} style={{
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: isMobile ? 20 : 28 }}>
+            <button onClick={onCreateRoom} style={{
               width: '100%', padding: '15px', background: 'rgba(240,238,233,0.07)',
               border: '1px solid rgba(255,255,255,0.1)', borderRadius: 10,
               color: '#F0EEE9', fontSize: 15, fontFamily: 'Outfit', fontWeight: 500,
-              cursor: unlocked ? 'pointer' : 'not-allowed', letterSpacing: '0.01em',
-              opacity: unlocked ? 1 : 0.4, transition: 'all 0.22s ease',
+              cursor: 'pointer', letterSpacing: '0.01em',
+              transition: 'all 0.22s ease',
             }}
-              onMouseEnter={e => { if (unlocked) { e.currentTarget.style.background = 'rgba(240,238,233,0.12)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.22)' } }}
+              onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,238,233,0.12)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.22)' }}
               onMouseLeave={e => { e.currentTarget.style.background = 'rgba(240,238,233,0.07)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.1)' }}
             >Create encrypted room</button>
-            <button onClick={() => setMode('join')} disabled={!unlocked} style={{
+            <button onClick={() => setMode('join')} style={{
               width: '100%', padding: '15px', background: 'none',
               border: '1px solid rgba(255,255,255,0.10)', borderRadius: 10,
               color: '#4A4A52', fontSize: 15, fontFamily: 'Outfit',
-              cursor: unlocked ? 'pointer' : 'not-allowed', opacity: unlocked ? 1 : 0.4,
+              cursor: 'pointer',
               transition: 'all 0.22s ease',
             }}
-              onMouseEnter={e => { if (unlocked) { e.currentTarget.style.color = '#F0EEE9'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.20)' } }}
-              onMouseLeave={e => { if (unlocked) { e.currentTarget.style.color = '#4A4A52'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.10)' } }}
+              onMouseEnter={e => { e.currentTarget.style.color = '#F0EEE9'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.20)' }}
+              onMouseLeave={e => { e.currentTarget.style.color = '#4A4A52'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.10)' }}
             >Join with room code</button>
           </div>
         ) : (
           <div style={{ animation: 'fadeIn 0.2s ease' }}>
             <input autoFocus value={joinCode}
               onChange={e => setJoinCode(e.target.value.toUpperCase().replace(/[^0-9A-F-]/g, ''))}
-              onKeyDown={e => e.key === 'Enter' && unlocked && joinValid && onJoinRoom(joinCode)}
+              onKeyDown={e => e.key === 'Enter' && joinValid && onJoinRoom(joinCode)}
               placeholder="XXX-XXX-XXX-XXX-XXX-XX"
               style={{
                 width: '100%', padding: '12px 16px', marginBottom: 10,
@@ -641,14 +571,14 @@ function Lobby({ alias, onCreateRoom, onJoinRoom, vaultExists, unlocked, busy, p
                 onMouseEnter={e => { e.currentTarget.style.color = '#F0EEE9' }}
                 onMouseLeave={e => { e.currentTarget.style.color = '#4A4A52' }}
               >Back</button>
-              <button onClick={() => joinValid && onJoinRoom(joinCode)} disabled={!unlocked || !joinValid || joinCode.length === 0} style={{
+              <button onClick={() => joinValid && onJoinRoom(joinCode)} disabled={!joinValid || joinCode.length === 0} style={{
                 flex: 2, padding: '12px', background: 'rgba(240,238,233,0.08)',
                 border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8,
                 color: '#F0EEE9', fontSize: 14, fontFamily: 'Outfit',
-                fontWeight: 500, cursor: (!unlocked || !joinValid || joinCode.length === 0) ? 'not-allowed' : 'pointer',
-                opacity: (!unlocked || !joinValid || joinCode.length === 0) ? 0.4 : 1, transition: 'all 0.18s',
+                fontWeight: 500, cursor: (!joinValid || joinCode.length === 0) ? 'not-allowed' : 'pointer',
+                opacity: (!joinValid || joinCode.length === 0) ? 0.4 : 1, transition: 'all 0.18s',
               }}
-                onMouseEnter={e => { if (unlocked && joinValid) e.currentTarget.style.background = 'rgba(240,238,233,0.14)' }}
+                onMouseEnter={e => { if (joinValid) e.currentTarget.style.background = 'rgba(240,238,233,0.14)' }}
                 onMouseLeave={e => { e.currentTarget.style.background = 'rgba(240,238,233,0.08)' }}
               >Enter room</button>
             </div>
@@ -657,7 +587,7 @@ function Lobby({ alias, onCreateRoom, onJoinRoom, vaultExists, unlocked, busy, p
       </div>
 
       {/* Trust indicators */}
-      <div style={{ display: 'flex', gap: 40, justifyContent: 'center', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: isMobile ? 24 : 40, justifyContent: 'center', flexWrap: 'wrap' }}>
         {[['Zero logs', 'Server stores nothing'], ['Ephemeral', 'Leaves no trace'], ['Blind server', 'Knocks — never listens']].map(([t, s]) => (
           <div key={t} style={{ textAlign: 'center' }}>
             <div style={{ fontSize: 12, color: 'rgba(240,238,233,0.35)', marginBottom: 3, fontWeight: 500 }}>{t}</div>
@@ -1012,10 +942,12 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: ChatPath }} />
           </Btn>
-          <Btn onClick={() => setSettingsOpen(true)} active title="Audio settings">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-              dangerouslySetInnerHTML={{ __html: GearPath }} />
-          </Btn>
+          {!isMobile && (
+            <Btn onClick={() => setSettingsOpen(true)} active title="Audio settings">
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+                dangerouslySetInnerHTML={{ __html: GearPath }} />
+            </Btn>
+          )}
           <Btn onClick={copyCode} active={!copied} title={copied ? 'Room code copied' : 'Copy room code — the relay only ever sees its SHA-256 hash'}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: copied ? CheckPath : CopyPath }} />
@@ -1170,20 +1102,13 @@ function BootFailure({ message, onBack }: { message: string; onBack: () => void 
 }
 
 // ── App inner ─────────────────────────────────────────────────────
-function AppInner({ view, alias, roomCode, onCreateRoom, onJoinRoom, onExit, vaultExists, unlocked, pwdBusy, pwdError, onUnlock, resetting, onReset }: {
+function AppInner({ view, alias, roomCode, onCreateRoom, onJoinRoom, onExit }: {
   view: View
   alias: string
   roomCode: string
   onCreateRoom: () => void
   onJoinRoom: (code: string) => void
   onExit: () => void
-  vaultExists: boolean
-  unlocked: boolean
-  pwdBusy: boolean
-  pwdError: string | null
-  onUnlock: (pass: string) => void
-  resetting: boolean
-  onReset: () => void
 }) {
   const [progress, setProgress] = useState(0)
   const [loadPct, setLoadPct] = useState(0)
@@ -1211,9 +1136,7 @@ function AppInner({ view, alias, roomCode, onCreateRoom, onJoinRoom, onExit, vau
       <SecurityLine progress={progress} />
       {!loadGone && <LoadingScreen progress={loadPct} hidden={hideLoad} />}
       {view === 'lobby'
-        ? <Lobby alias={alias} onCreateRoom={onCreateRoom} onJoinRoom={onJoinRoom}
-            vaultExists={vaultExists} unlocked={unlocked} busy={pwdBusy} pwdError={pwdError} onUnlock={onUnlock}
-            resetting={resetting} onReset={onReset} />
+        ? <Lobby alias={alias} onCreateRoom={onCreateRoom} onJoinRoom={onJoinRoom} />
         : <RoomGate roomCode={roomCode} alias={alias} onExit={exitRoom} />
       }
     </div>
@@ -1227,42 +1150,15 @@ export default function App() {
   const [roomCode, setRoomCode] = useState('')
   const [roomHash, setRoomHash] = useState('')
   const [roomCreated, setRoomCreated] = useState(true)
-  const [vaultExists, setVaultExists] = useState<boolean | null>(null)
-  const [pwdError, setPwdError] = useState<string | null>(null)
-  const [pwdBusy, setPwdBusy] = useState(false)
-  const [resetting, setResetting] = useState(false)
   const [pickleKey, setPickleKey] = useState<string | null>(null)
 
+  // No passphrase gate anymore — the device key is minted fresh for the
+  // session, so a guest just taps "create" and walks in.
   useEffect(() => {
-    void hasVault().then(exists => setVaultExists(exists))
+    let mounted = true
+    void openDeviceKey().then(key => { if (mounted) setPickleKey(key) })
+    return () => { mounted = false }
   }, [])
-
-  const resetDevice = useCallback(async () => {
-    setResetting(true)
-    try {
-      await resetVault()
-      setPickleKey(null)
-      setVaultExists(false)
-    } finally {
-      setResetting(false)
-    }
-  }, [])
-
-  const unlock = useCallback(async (pass: string) => {
-    const exists = vaultExists ?? false
-    if (!pass) { setPwdError('Passphrase cannot be empty.'); return }
-    setPwdBusy(true)
-    setPwdError(null)
-    try {
-      const key = exists ? await unlockVault(pass) : await createVault(pass)
-      setPickleKey(key)
-      if (!exists) setVaultExists(true)
-    } catch (err) {
-      setPwdError(err instanceof Error ? err.message : 'Unlock failed.')
-    } finally {
-      setPwdBusy(false)
-    }
-  }, [vaultExists])
 
   // Enter a room while keeping the human code ONLY for display/copy. Every
   // byte that reaches the wire is the SHA-256 of the canonical code, so the
@@ -1280,8 +1176,10 @@ export default function App() {
     setRoomCode(code)
     setRoomCreated(isCreate)
     setRoomHash(await hashRoomCode(key))
+    const deviceKey = pickleKey ?? await openDeviceKey()
+    setPickleKey(deviceKey)
     setView('room')
-  }, [])
+  }, [pickleKey])
 
   return (
     <E2eProvider
@@ -1297,13 +1195,6 @@ export default function App() {
         onCreateRoom={() => void enterRoom(null, true)}
         onJoinRoom={code => void enterRoom(code, false)}
         onExit={() => setView('lobby')}
-        vaultExists={vaultExists ?? false}
-        unlocked={pickleKey != null}
-        pwdBusy={pwdBusy}
-        pwdError={pwdError}
-        onUnlock={unlock}
-        resetting={resetting}
-        onReset={resetDevice}
       />
     </E2eProvider>
   )

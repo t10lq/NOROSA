@@ -53,6 +53,19 @@ export async function hasVault(): Promise<boolean> {
 }
 
 /**
+ * Auto flow — the app no longer asks for a passphrase before entering a room.
+ * Every session mints a fresh random DEVICE key that exists only in memory:
+ * nothing persisted can unlock it, so nothing survives a session — exactly the
+ * right property for ephemeral rooms. If a legacy passphrase vault exists on
+ * this device (created before this flow), it is wiped: its identity can no
+ * longer be re-derived and the session starts clean.
+ */
+export async function openDeviceKey(): Promise<string> {
+  if (await hasVault()) await IdbStore.clear()
+  return b64Encode(crypto.getRandomValues(new Uint8Array(DEVICE_KEY_BYTES)))
+}
+
+/**
  * Last-resort escape when the passphrase is lost: wipe the vault AND the
  * pickled keystore. Nothing is recoverable — the identity starts completely
  * fresh. By design there is no softer backdoor.
