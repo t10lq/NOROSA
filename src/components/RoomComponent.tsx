@@ -23,8 +23,12 @@ import {
 
 const WIDTH = 340
 
-export function RoomComponent({ userId }: { userId: string }) {
+export function RoomComponent({ userId, onClose }: { userId: string; onClose?: () => void }) {
   const { service, isReady, error } = useE2e()
+
+  // When an onClose handler is present this panel is a full-screen overlay
+  // (mobile); otherwise it is the desktop side rail.
+  const full = onClose !== undefined
 
   const [draft, setDraft] = useState('')
   const [sendErr, setSendErr] = useState<string | null>(null)
@@ -61,16 +65,19 @@ export function RoomComponent({ userId }: { userId: string }) {
   }
 
   if (!isReady) {
-    return <BootPanel error={error} />
+    return <BootPanel error={error} full={full} onClose={onClose} />
   }
 
   const encrypted = groupId !== null
 
   return (
     <div style={{
-      width: WIDTH, minWidth: WIDTH, maxWidth: '100%',
+      width: full ? '100%' : WIDTH,
+      minWidth: full ? 0 : WIDTH,
+      maxWidth: '100%',
       background: 'rgba(10,10,11,0.92)',
-      borderLeft: '1px solid rgba(255,255,255,0.09)',
+      borderLeft: full ? 'none' : '1px solid rgba(255,255,255,0.09)',
+      borderRight: full ? '1px solid rgba(255,255,255,0.09)' : 'none',
       display: 'flex', flexDirection: 'column', height: '100%',
       backdropFilter: 'blur(24px)',
       animation: 'slideInRight 0.28s cubic-bezier(0.4,0,0.2,1)',
@@ -87,11 +94,18 @@ export function RoomComponent({ userId }: { userId: string }) {
           <span style={{ fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.12em', color: encrypted ? 'rgba(240,238,233,0.4)' : 'rgba(240,238,233,0.25)' }}>
             END-TO-END ENCRYPTED
           </span>
-          <span style={{
-            marginLeft: 'auto', width: 5, height: 5, borderRadius: '50%',
-            background: encrypted ? 'rgba(240,238,233,0.35)' : 'rgba(240,238,233,0.12)',
-            animation: 'breathe 3s ease infinite',
-          }} />
+          {onClose && (
+            <button onClick={onClose}
+              className="tap"
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'rgba(240,238,233,0.4)', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
+          )}
+          {!onClose && (
+            <span style={{
+              marginLeft: 'auto', width: 5, height: 5, borderRadius: '50%',
+              background: encrypted ? 'rgba(240,238,233,0.35)' : 'rgba(240,238,233,0.12)',
+              animation: 'breathe 3s ease infinite',
+            }} />
+          )}
         </div>
 
         <div style={{ fontFamily: "'Space Mono'", fontSize: 9, letterSpacing: '0.09em', lineHeight: 1.6 }}>
@@ -181,17 +195,25 @@ export function RoomComponent({ userId }: { userId: string }) {
   )
 }
 
-function BootPanel({ error }: { error: string | null }) {
+function BootPanel({ error, full, onClose }: { error: string | null; full?: boolean; onClose?: () => void }) {
   return (
     <div style={{
-      width: WIDTH, minWidth: WIDTH,
+      width: full ? '100%' : WIDTH,
+      minWidth: full ? 0 : WIDTH,
       background: 'rgba(10,10,11,0.92)',
-      borderLeft: '1px solid rgba(255,255,255,0.09)',
+      borderLeft: full ? 'none' : '1px solid rgba(255,255,255,0.09)',
+      borderRight: full ? '1px solid rgba(255,255,255,0.09)' : 'none',
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       justifyContent: 'center', gap: 16, padding: '30px 26px',
       height: '100%', backdropFilter: 'blur(24px)',
       animation: 'slideInRight 0.28s cubic-bezier(0.4,0,0.2,1)',
+      position: 'relative',
     }}>
+      {onClose && (
+        <button onClick={onClose}
+          className="tap"
+          style={{ position: 'absolute', top: 14, right: 16, background: 'none', border: 'none', color: 'rgba(240,238,233,0.4)', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: '0 2px' }}>×</button>
+      )}
       <div className="hlog-breathe">
         <HedgehogLogo size={54} tone={error ? 'red' : 'light'} />
       </div>

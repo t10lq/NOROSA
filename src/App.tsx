@@ -8,6 +8,7 @@ import { CallProvider, useCalls } from './context/CallContext'
 import { getChatPeers, subscribeRoomChat } from './components/roomChat'
 import { createVault, hasVault, resetVault, unlockVault } from './e2ee/vault'
 import { formatRoomCode, generateRoomCode, hashRoomCode, isValidCode, normalizeRoomCode } from './e2ee/roomcode'
+import { SpeakerRouter } from './e2ee/speakerRouter'
 
 const φ = 1.618033988749895
 // Point the client at the relay with VITE_RELAY_URL (e.g. wss://relay.example.com)
@@ -74,6 +75,21 @@ const CopyPath = '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 1
 const CheckPath = '<polyline points="20 6 9 17 4 12"/>'
 const GearPath = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>'
 const SpeakerPath = '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>'
+const EarPath = '<path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>'
+
+// Simple viewport media query hook — lets the room switch to the mobile
+// layout (single-column tiles, chat full-screen) on narrow screens.
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(query)
+    const onChange = () => setMatches(mq.matches)
+    onChange()
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [query])
+  return matches
+}
 
 // ── SecurityLine ──────────────────────────────────────────────────
 function SecurityLine({ progress }: { progress: number }) {
@@ -96,6 +112,7 @@ function TileVideo({ stream, mirrored, muted }: { stream: MediaStream | null; mi
     const el = ref.current
     if (!el) return
     el.srcObject = stream
+    void el.play().catch(() => {})
     return () => { el.srcObject = null }
   }, [stream])
   return (
@@ -107,8 +124,30 @@ function TileVideo({ stream, mirrored, muted }: { stream: MediaStream | null; mi
   )
 }
 
+// Remote video routed through the SpeakerRouter — re-uses the raw stream but
+// lets the router decide between the WebAudio speakerphone path and the native
+// element (earpiece) path, and explicitly starts playback.
+function SpeakerVideo({ router, peer, stream }: { router: SpeakerRouter; peer: string; stream: MediaStream | null }) {
+  const ref = useRef<HTMLVideoElement | null>(null)
+  const sig = stream ? `${stream.getAudioTracks().length}/${stream.getVideoTracks().length}` : 'none'
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (stream) router.attach(peer, el, stream)
+    else router.detach(peer)
+  }, [router, peer, sig, stream])
+  useEffect(() => () => router.detach(peer), [router, peer])
+  return (
+    <video ref={ref} autoPlay playsInline
+      style={{
+        position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
+        background: '#0a0a0b',
+      }} />
+  )
+}
+
 // ── Participant tile ──────────────────────────────────────────────
-function ParticipantTile({ p, large }: { p: Participant; large?: boolean }) {
+function ParticipantTile({ p, large, router }: { p: Participant; large?: boolean; router?: SpeakerRouter }) {
   return (
     <div style={{
       position: 'relative', display: 'flex', alignItems: 'center',
@@ -118,7 +157,9 @@ function ParticipantTile({ p, large }: { p: Participant; large?: boolean }) {
       borderRadius: '6px',
       transition: 'border-color 0.3s ease',
     }}>
-      {p.stream && <TileVideo stream={p.stream} mirrored={p.id === 'self'} muted={p.id === 'self'} />}
+      {p.id === 'self' || !router
+        ? p.stream && <TileVideo stream={p.stream} mirrored={p.id === 'self'} muted={p.id === 'self'} />
+        : <SpeakerVideo router={router} peer={p.id} stream={p.stream} />}
       {p.dropping && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none',
@@ -166,9 +207,11 @@ function Btn({ onClick, active = true, danger = false, title, pending = false, c
   return (
     <button onClick={onClick} title={title}
       onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
+      className="tap"
       style={{
         width: 46, height: 46, borderRadius: '10px', cursor: pending ? 'progress' : 'pointer',
         display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        touchAction: 'manipulation',
         border: danger
           ? `1px solid ${hov ? 'rgba(179,36,31,0.7)' : 'rgba(179,36,31,0.3)'}`
           : `1px solid ${hov ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.10)'}`,
@@ -654,6 +697,23 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
   const [camHint, setCamHint] = useState<'idle' | 'ready' | 'blocked'>('idle')
   const [, force] = useReducer(x => x + 1, 0)
 
+  const isMobile = useMediaQuery('(max-width: 700px)')
+  const speakerRouterRef = useRef<SpeakerRouter | null>(null)
+  if (!speakerRouterRef.current) speakerRouterRef.current = new SpeakerRouter()
+  const [speakerOn, setSpeakerOn] = useState(false)
+  useEffect(() => () => speakerRouterRef.current?.reset(), [])
+  const toggleSpeaker = () => {
+    setSpeakerOn(on => {
+      const next = !on
+      speakerRouterRef.current?.setSpeaker(next)
+      return next
+    })
+  }
+  const selectOutput = (id: string) => {
+    setSelOut(id)
+    speakerRouterRef.current?.setOutputDevice(id)
+  }
+
   useEffect(() => subscribeRoomChat(force), [])
 
   // One identity source: the relay-assigned connection alias. It is what the
@@ -684,7 +744,7 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
       } as Participant
     }),
   ]
-  const cols = all.length <= 1 ? 1 : all.length <= 4 ? 2 : 3
+  const cols = isMobile ? 1 : all.length <= 1 ? 1 : all.length <= 4 ? 2 : 3
 
   const nudge = useCallback(() => {
     setCtrlVis(true)
@@ -726,6 +786,25 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
     }
     load()
     return () => { cancelled = true }
+  }, [])
+
+  // Auto re-detect devices whenever hardware state changes (headset plugged in,
+  // Bluetooth reconnects, camera unplugged …) so new mics/cams/speakers appear
+  // without a page reload.
+  useEffect(() => {
+    const md = navigator.mediaDevices
+    if (!md?.addEventListener) return
+    const onChange = () => {
+      md.enumerateDevices().then(all => {
+        setMediaDevices({
+          input: all.filter(d => d.kind === 'audioinput'),
+          output: all.filter(d => d.kind === 'audiooutput'),
+          camera: all.filter(d => d.kind === 'videoinput'),
+        })
+      }).catch(() => {})
+    }
+    md.addEventListener('devicechange', onChange)
+    return () => md.removeEventListener('devicechange', onChange)
   }, [])
 
   // Grant-blocked states discovered by the live call feed a clear hint.
@@ -815,7 +894,7 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)}
         input={mediaDevices.input} output={mediaDevices.output} camera={mediaDevices.camera}
         selIn={selIn} selOut={selOut} selCam={selCam} micHint={micHint} camHint={camHint}
-        onSelectIn={selectInput} onSelectOut={setSelOut} onSelectCam={selectCamera} />
+        onSelectIn={selectInput} onSelectOut={selectOutput} onSelectCam={selectCamera} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
@@ -824,8 +903,11 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
 
         {/* Header */}
         <div style={{
-          height: 55, display: 'flex', alignItems: 'center',
-          padding: '0 20px', gap: 16,
+          height: isMobile ? 'auto' : 55,
+          minHeight: isMobile ? 52 : 55,
+          display: 'flex', alignItems: 'center',
+          padding: isMobile ? 'calc(8px + env(safe-area-inset-top)) 12px 8px' : '0 20px',
+          gap: isMobile ? 8 : 16,
           background: 'rgba(10,10,11,0.75)', backdropFilter: 'blur(16px)',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
           position: 'relative', zIndex: 10,
@@ -837,12 +919,14 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
             <span style={{ fontFamily: "'Space Mono'", fontSize: 13, letterSpacing: '0.2em', color: '#F0EEE9' }}>Norosa</span>
           </span>
 
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(240,238,233,0.3)', animation: 'breathe 3s ease infinite' }} />
-              <span style={{ fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.08em', color: '#3A3A3F' }}>E2E ENCRYPTED</span>
-            </div>
-            <span style={{ fontFamily: "'Space Mono'", fontSize: 10, color: '#3A3A3F', letterSpacing: '0.06em' }}>{selfName}</span>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 16 }}>
+            {!isMobile && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(240,238,233,0.3)', animation: 'breathe 3s ease infinite' }} />
+                <span style={{ fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.08em', color: '#3A3A3F' }}>E2E ENCRYPTED</span>
+              </div>
+            )}
+            <span style={{ fontFamily: "'Space Mono'", fontSize: 10, color: '#3A3A3F', letterSpacing: '0.06em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '38vw' }}>{selfName}</span>
           </div>
         </div>
 
@@ -850,9 +934,10 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
         <div style={{
           flex: 1, display: 'grid',
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
+          gridAutoRows: '1fr',
           gap: '2px', padding: '2px', background: '#060606',
         }}>
-          {all.map(p => <ParticipantTile key={p.id} p={p} large={all.length === 1} />)}
+          {all.map(p => <ParticipantTile key={p.id} p={p} large={all.length === 1} router={speakerRouterRef.current ?? undefined} />)}
         </div>
 
         {/* Capture in flight — instant feedback for the camera button */}
@@ -897,7 +982,12 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
 
         {/* Controls */}
         <div style={{
-          height: 88, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+          height: isMobile ? undefined : 88,
+          minHeight: isMobile ? undefined : 88,
+          padding: isMobile ? '10px 8px calc(10px + env(safe-area-inset-bottom))' : '0',
+          flexWrap: isMobile ? 'wrap' : undefined,
+          rowGap: isMobile ? 10 : undefined,
           background: 'rgba(10,10,11,0.82)', backdropFilter: 'blur(20px)',
           borderTop: '1px solid rgba(255,255,255,0.08)',
           opacity: ctrlVis ? 1 : 0.1, transition: 'opacity 0.5s ease',
@@ -909,6 +999,10 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
           <Btn onClick={() => calls.setCamOn(!videoOff, selCam !== 'default' ? selCam : undefined)} active={!videoOff && !calls.camBlocked} pending={calls.camPending || (calls.camOn && !calls.localCamera)} title={videoOff ? 'Enable video' : 'Disable video'}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: VidePath + (videoOff ? SlashPath : '') }} />
+          </Btn>
+          <Btn onClick={toggleSpeaker} active={speakerOn} title={speakerOn ? 'Speakerphone — tap for earpiece' : 'Earpiece — tap for speakerphone'}>
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+              dangerouslySetInnerHTML={{ __html: speakerOn ? SpeakerPath : EarPath }} />
           </Btn>
           <Btn onClick={() => setSharing(s => !s)} active={sharing} title={sharing ? 'Stop sharing' : 'Share screen'}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
@@ -934,7 +1028,22 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
         </div>
       </div>
 
-      {chatOpen && <RoomComponent userId={alias} />}
+      {chatOpen && (
+        isMobile ? (
+          <div onClick={() => setChatOpen(false)}
+            style={{
+              position: 'absolute', inset: 0, zIndex: 60, display: 'flex',
+              background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(3px)',
+              paddingTop: 'env(safe-area-inset-top)', paddingBottom: 'env(safe-area-inset-bottom)',
+            }}>
+            <div onClick={e => e.stopPropagation()} style={{ flex: 1, minWidth: 0, display: 'flex' }}>
+              <RoomComponent userId={alias} onClose={() => setChatOpen(false)} />
+            </div>
+          </div>
+        ) : (
+          <RoomComponent userId={alias} />
+        )
+      )}
 
       <style>{`
         @keyframes slideDown { from { opacity:0; transform:translateX(-50%) translateY(-10px) } to { opacity:1; transform:translateX(-50%) translateY(0) } }

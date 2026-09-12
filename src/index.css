@@ -68,6 +68,19 @@ scrollbar-width: none;
   100% { transform: rotate(0) scale(1); }
 }
 
+/* Touch / press feedback for control icons and tappable surfaces */
+.tap {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 0.12s ease, filter 0.12s ease;
+}
+.tap:active {
+  transform: scale(0.88);
+  filter: brightness(1.6);
+}
+
 .hlog-breathe { animation: hlog-breathe 3.6s ease-in-out infinite; transform-origin: 50% 50%; }
 .hlog-blink { transform-box: fill-box; transform-origin: center; animation: hlog-blink 4.6s ease-in-out infinite; }
 .hlog-enter { animation: hlog-enter 0.85s cubic-bezier(0.22,1,0.36,1) backwards; }
