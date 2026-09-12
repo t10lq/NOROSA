@@ -33,7 +33,7 @@ export function RoomComponent({ userId, onClose }: { userId: string; onClose?: (
   const [draft, setDraft] = useState('')
   const [sendErr, setSendErr] = useState<string | null>(null)
   const [, force] = useReducer(x => x + 1, 0)
-  const endRef = useRef<HTMLDivElement | null>(null)
+  const listRef = useRef<HTMLDivElement | null>(null)
 
   const messages = getChatMessages()
   const groupId = getChatGroup()
@@ -47,8 +47,14 @@ export function RoomComponent({ userId, onClose }: { userId: string; onClose?: (
   const anyChanged = safetyRows.some(x => x.status.changed)
 
   useEffect(() => subscribeRoomChat(force), [])
+  // Bottom-anchored like a typical chat app: on first open and whenever a new
+  // message lands, stick to the newest message — unless the reader is already
+  // scrolling through history.
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
+    const el = listRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    if (nearBottom) el.scrollTop = el.scrollHeight
   }, [messages])
 
   const send = async () => {
@@ -130,7 +136,7 @@ export function RoomComponent({ userId, onClose }: { userId: string; onClose?: (
       </div>
 
       {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
+      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
         {messages.length === 0
           ? (
             <p style={{ padding: '34px 20px', textAlign: 'center', color: '#3A3A3F', fontSize: 13, fontWeight: 400, lineHeight: 1.6 }}>
@@ -151,7 +157,6 @@ export function RoomComponent({ userId, onClose }: { userId: string; onClose?: (
             </div>
           ))
         }
-        <div ref={endRef} />
       </div>
 
       {/* Composer */}
