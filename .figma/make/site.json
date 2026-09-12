@@ -1,0 +1,10 @@
+{
+  "description": "Experience secure, anonymous meetings in a visually stunning environment where privacy is paramount, ensuring no data is stored after sessions end.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}

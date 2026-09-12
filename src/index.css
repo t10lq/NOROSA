@@ -1,0 +1,74 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600&family=Space+Mono:wght@400;700&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --color-background: #0A0A0B;
+  --color-surface: #111113;
+  --color-surface-2: #18181B;
+  --color-foreground: #F0EEE9;
+  --color-muted: #5C5C63;
+  --color-danger: #B3241F;
+  --color-danger-dim: #6B1512;
+  --color-border: rgba(255,255,255,0.10);
+  --color-border-hover: rgba(255,255,255,0.16);
+
+  --font-sans: 'Outfit', system-ui, sans-serif;
+  --font-mono: 'Space Mono', monospace;
+
+  /* Golden ratio spacing: 8 13 21 34 55 89 */
+  --spacing-phi-1: 8px;
+  --spacing-phi-2: 13px;
+  --spacing-phi-3: 21px;
+  --spacing-phi-4: 34px;
+  --spacing-phi-5: 55px;
+  --spacing-phi-6: 89px;
+
+  /* norosa broadcasting brand — deep slate, neon transmission green */
+  --color-noir: #0B0F19;
+  --color-noir-deep: #080B13;
+  --color-noir-raise: #10162A;
+  --color-neon: #2EF2AB;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  background: #0A0A0B;
+  color: #F0EEE9;
+  font-family: 'Outfit', system-ui, sans-serif;
+  -webkit-font-smoothing: auto;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
+  font-optical-sizing: auto;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::-webkit-scrollbar { width: 0; height: 0; }
+scrollbar-width: none;
+
+@keyframes hlog-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
+}
+@keyframes hlog-blink {
+  0%, 90%, 100% { transform: scaleY(1); }
+  94% { transform: scaleY(0.12); }
+}
+@keyframes hlog-enter {
+  0% { transform: rotate(-16deg) scale(0.7); opacity: 0; }
+  100% { transform: rotate(0) scale(1); opacity: 1; }
+}
+@keyframes hlog-settle {
+  0% { transform: rotate(12deg) scale(1.18); }
+  100% { transform: rotate(0) scale(1); }
+}
+
+.hlog-breathe { animation: hlog-breathe 3.6s ease-in-out infinite; transform-origin: 50% 50%; }
+.hlog-blink { transform-box: fill-box; transform-origin: center; animation: hlog-blink 4.6s ease-in-out infinite; }
+.hlog-enter { animation: hlog-enter 0.85s cubic-bezier(0.22,1,0.36,1) backwards; }
+.hlog-settle { animation: hlog-settle 0.7s cubic-bezier(0.22,1,0.36,1) backwards; }
