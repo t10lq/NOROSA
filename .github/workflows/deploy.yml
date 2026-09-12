@@ -51,7 +51,13 @@ jobs:
         run: npm run build
 
       - name: Assert relay URL inlined into bundle
-        run: grep -rl "wss://norosa.app/ws" dist/ || (echo "v: VITE_RELAY_URL was NOT inlined into the bundle — check the build." && exit 1)
+        run: |
+          if grep -rl "wss://norosa.app/ws" dist/; then
+            echo "OK: relay URL inlined into the bundle"
+          else
+            echo "ERROR: VITE_RELAY_URL was NOT inlined into the bundle"
+            exit 1
+          fi
 
       - name: Install relay dependencies
         working-directory: server
