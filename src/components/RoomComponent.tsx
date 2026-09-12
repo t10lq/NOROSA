@@ -135,8 +135,12 @@ export function RoomComponent({ userId, onClose }: { userId: string; onClose?: (
         )}
       </div>
 
-      {/* Messages */}
-      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '12px 0' }}>
+      {/* Messages — anchored at the bottom like a typical chat app: the cluster of
+          bubbles sits directly above the composer and older messages push up as
+          new ones land (the margin-top:auto spacer collapses once the list
+          overflows and normal scrolling takes over). */}
+      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '12px 0', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ marginTop: 'auto' }} />
         {messages.length === 0
           ? (
             <p style={{ padding: '34px 20px', textAlign: 'center', color: '#3A3A3F', fontSize: 13, fontWeight: 400, lineHeight: 1.6 }}>
