@@ -138,20 +138,22 @@ jobs:
               sudo apt-get update -qq
               sudo DEBIAN_FRONTEND=noninteractive apt-get install -y coturn
             fi
-            sudo tee /etc/turnserver.conf >/dev/null <<TURNEOF
-listening-port=3478
-realm=norosa.app
-server-name=norosa
-fingerprint
-lt-cred-mech
-use-auth-secret
-static-auth-secret=$TURN_SECRET
-total-quota=100
-stale-nonce=600
-no-multicast-peers
-no-cli
-verbose
-TURNEOF
+            # YAML block scalars must keep every line indented, so the config
+            # body carries leading whitespace; sed strips it before tee writes.
+            sed -E 's/^[[:space:]]+//' <<TURNEOF | sudo tee /etc/turnserver.conf >/dev/null
+            listening-port=3478
+            realm=norosa.app
+            server-name=norosa
+            fingerprint
+            lt-cred-mech
+            use-auth-secret
+            static-auth-secret=$TURN_SECRET
+            total-quota=100
+            stale-nonce=600
+            no-multicast-peers
+            no-cli
+            verbose
+            TURNEOF
             sudo systemctl enable coturn
             sudo systemctl restart coturn
           fi
