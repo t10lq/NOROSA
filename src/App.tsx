@@ -683,7 +683,11 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
   }, [])
 
   useEffect(() => { nudge(); return () => { if (hideRef.current) clearTimeout(hideRef.current) } }, [nudge])
-  useEffect(() => { const t = setTimeout(() => setAlert('recording'), 8000); return () => clearTimeout(t) }, [])
+  // NOTE: browsers expose no API telling a page that it is being screen-
+  // recorded, so a persistent "recording detected" banner cannot be honest.
+  // Anti-leak protection instead comes from the watermark overlay below
+  // (every captured frame carries alias + room code + clock) plus the
+  // duplicate-tab screen. No timer fakes an alert.
   // The permission prompts fire here, once, on room entry: microphone first
   // (the call needs it the moment a peer is online). The camera is only
   // requested at first video toggle — a listening call should never have
@@ -866,8 +870,19 @@ function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; on
           gridTemplateColumns: `repeat(${cols}, 1fr)`,
           gridAutoRows: '1fr',
           gap: '2px', padding: '2px', background: '#060606',
+          position: 'relative',
         }}>
           {all.map(p => <ParticipantTile key={p.id} p={p} large={all.length === 1} router={speakerRouterRef.current ?? undefined} />)}
+          {/* Leak watermark — every recorded/captured frame is traceable to this
+              identity, room and moment. True "is it being recorded?" detection is
+              not exposed to web pages, so we mark instead of guess. */}
+          <div style={{
+            position: 'absolute', right: 12, bottom: 10, zIndex: 5, pointerEvents: 'none', userSelect: 'none',
+            fontFamily: "'Space Mono'", fontSize: 9, letterSpacing: '0.12em',
+            color: 'rgba(240,238,233,0.18)', opacity: 0.75,
+          }}>
+            {selfName} · {roomCode} · {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </div>
         </div>
 
         {/* Capture in flight — instant feedback for the camera button */}
