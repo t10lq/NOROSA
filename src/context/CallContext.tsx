@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useE2e } from './E2eContext'
-import { MediaCallClient, probeEncodedStreamsCaps, type EncodedCapsProbe, type MediaCallEvents } from '../e2ee/webrtc'
+import { MediaCallClient, defaultIceServers, probeEncodedStreamsCaps, type EncodedCapsProbe, type MediaCallEvents } from '../e2ee/webrtc'
 
 /**
  * Media-plane bridge.
@@ -127,14 +127,23 @@ export function CallProvider({ children }: { children: ReactNode }) {
       },
     }
 
-    const client = new MediaCallClient(service, events)
-    mediaRef.current = client
-    setMedia(client)
-    void client.start()
+    let client: MediaCallClient | null = null
+    let cancelled = false
+    void (async () => {
+      // TURN creds are minted at runtime (static-auth-secret REST scheme) — a
+      // short await that resolves instantly when no TURN is configured.
+      const ice = await defaultIceServers()
+      if (cancelled) return
+      client = new MediaCallClient(service, events, ice)
+      mediaRef.current = client
+      setMedia(client)
+      void client.start()
+    })()
 
     return () => {
+      cancelled = true
       mediaRef.current = null
-      client.dispose()
+      client?.dispose()
       setMedia(null)
       setRemoteStreams(new Map())
       setPeerMics(new Map())

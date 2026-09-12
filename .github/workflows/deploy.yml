@@ -48,14 +48,22 @@ jobs:
       - name: Build frontend
         env:
           VITE_RELAY_URL: wss://norosa.app/ws
+          VITE_TURN_URLS: turn:norosa.app:3478?transport=udp,turn:norosa.app:3478?transport=tcp
+          VITE_TURN_SECRET: ${{ secrets.TURN_SECRET }}
         run: npm run build
 
-      - name: Assert relay URL inlined into bundle
+      - name: Assert relay + TURN config inlined into bundle
         run: |
           if grep -rl "wss://norosa.app/ws" dist/; then
             echo "OK: relay URL inlined into the bundle"
           else
             echo "ERROR: VITE_RELAY_URL was NOT inlined into the bundle"
+            exit 1
+          fi
+          if grep -rl "turn:norosa.app:3478" dist/; then
+            echo "OK: TURN URL inlined into the bundle"
+          else
+            echo "ERROR: VITE_TURN_URLS was NOT inlined into the bundle"
             exit 1
           fi
 
@@ -93,8 +101,9 @@ jobs:
           DEPLOY_HOST: 13.38.54.47
           DEPLOY_USER: ubuntu
           RELEASE_ID: ${{ github.sha }}
+          TURN_SECRET: ${{ secrets.TURN_SECRET }}
         run: |
-          ssh -i ~/.ssh/norosa_deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "RELEASE_ID='$RELEASE_ID' bash -s" <<'REMOTE'
+          ssh -i ~/.ssh/norosa_deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "RELEASE_ID='$RELEASE_ID' TURN_SECRET='$TURN_SECRET' bash -s" <<'REMOTE'
           set -euo pipefail
 
           RELEASE="/var/www/norosa-project/releases/$RELEASE_ID"
@@ -119,6 +128,33 @@ jobs:
           sudo systemctl restart norosa-relay
           sudo nginx -t
           sudo systemctl reload nginx
+
+          # TURN relay (coturn) — needed for symmetric-NAT / guest-Wi-Fi phones,
+          # where STUN alone can never complete ICE. Only configured when the
+          # TURN_SECRET action secret is present; the bundle was also built
+          # without TURN in that case, keeping the STUN-only fallback.
+          if [ -n "${TURN_SECRET:-}" ]; then
+            if ! command -v turnserver >/dev/null 2>&1; then
+              sudo apt-get update -qq
+              sudo DEBIAN_FRONTEND=noninteractive apt-get install -y coturn
+            fi
+            sudo tee /etc/turnserver.conf >/dev/null <<TURNEOF
+listening-port=3478
+realm=norosa.app
+server-name=norosa
+fingerprint
+lt-cred-mech
+use-auth-secret
+static-auth-secret=$TURN_SECRET
+total-quota=100
+stale-nonce=600
+no-multicast-peers
+no-cli
+verbose
+TURNEOF
+            sudo systemctl enable coturn
+            sudo systemctl restart coturn
+          fi
 
           for i in 1 2 3 4 5; do
             if curl -fsS --max-time 10 -o /dev/null https://norosa.app; then
