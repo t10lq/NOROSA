@@ -9,11 +9,9 @@ import { getChatPeers, subscribeRoomChat } from './components/roomChat'
 import { openDeviceKey } from './e2ee/vault'
 import { formatRoomCode, generateRoomCode, hashRoomCode, isValidCode, normalizeRoomCode } from './e2ee/roomcode'
 import { SpeakerRouter } from './e2ee/speakerRouter'
+import { RELAY_URL } from './config/env'
 
 const φ = 1.618033988749895
-// Point the client at the relay with VITE_RELAY_URL (e.g. wss://relay.example.com)
-// — falls back to the local dev relay. Must be a WebSocket URL.
-const RELAY_URL = import.meta.env.VITE_RELAY_URL ?? 'ws://127.0.0.1:8081'
 
 // ── Anonymous name generator ─────────────────────────────────────
 const ADJECTIVES = [
