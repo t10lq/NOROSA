@@ -1,0 +1,132 @@
+name: Deploy NOROSA to EC2
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: norosa-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Build and deploy production
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: production
+      url: https://norosa.app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate repository
+        run: |
+          test -f package.json
+          test -f package-lock.json
+          test -f server/package.json
+          test -f server/package-lock.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build frontend
+        env:
+          VITE_RELAY_URL: wss://norosa.app/ws
+        run: npm run build
+
+      - name: Install relay dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Build relay
+        working-directory: server
+        run: npm run build
+
+      - name: Configure SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/norosa_deploy_key
+          chmod 600 ~/.ssh/norosa_deploy_key
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Upload frontend and relay build
+        env:
+          DEPLOY_HOST: 13.38.54.47
+          DEPLOY_USER: ubuntu
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/norosa_deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /var/www/norosa-project/releases/$RELEASE_ID/client /var/www/norosa-project/releases/$RELEASE_ID/server"
+          scp -i ~/.ssh/norosa_deploy_key -r dist/. "$DEPLOY_USER@$DEPLOY_HOST:/var/www/norosa-project/releases/$RELEASE_ID/client/"
+          scp -i ~/.ssh/norosa_deploy_key -r server/dist/. "$DEPLOY_USER@$DEPLOY_HOST:/var/www/norosa-project/releases/$RELEASE_ID/server/"
+
+      - name: Activate release
+        env:
+          DEPLOY_HOST: 13.38.54.47
+          DEPLOY_USER: ubuntu
+          RELEASE_ID: ${{ github.sha }}
+        run: |
+          ssh -i ~/.ssh/norosa_deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "RELEASE_ID='$RELEASE_ID' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          RELEASE="/var/www/norosa-project/releases/$RELEASE_ID"
+          CLIENT="$RELEASE/client"
+          SERVER="$RELEASE/server"
+          WEBROOT="/var/www/norosa.app"
+          ACTIVE="/var/www/norosa-project/active-release"
+
+          test -f "$CLIENT/index.html"
+          test -f "$SERVER/index.js"
+
+          sudo mkdir -p "$WEBROOT"
+          sudo rsync -a --delete "$CLIENT/" "$WEBROOT/"
+          sudo chown -R www-data:www-data "$WEBROOT"
+          sudo find "$WEBROOT" -type d -exec chmod 755 {} +
+          sudo find "$WEBROOT" -type f -exec chmod 644 {} +
+
+          sudo mkdir -p /var/www/norosa-project/server/dist
+          sudo rsync -a --delete "$SERVER/" /var/www/norosa-project/server/dist/
+          sudo chown -R ubuntu:ubuntu /var/www/norosa-project/server/dist
+
+          sudo systemctl restart norosa-relay
+          sudo nginx -t
+          sudo systemctl reload nginx
+
+          for i in 1 2 3 4 5; do
+            if curl -fsS --max-time 10 -o /dev/null https://norosa.app; then
+              break
+            fi
+            sleep 2
+          done
+          curl -fsS --max-time 10 -o /dev/null https://norosa.app
+          systemctl is-active --quiet norosa-relay
+
+          printf '%s\n' "$RELEASE_ID" | sudo tee "$ACTIVE" >/dev/null
+
+          find /var/www/norosa-project/releases -mindepth 1 -maxdepth 1 -type d ! -name "$RELEASE_ID" -mtime +7 -exec sudo rm -rf {} +
+          REMOTE
+
+      - name: Deployment summary
+        run: |
+          echo "NOROSA production deployed successfully."
+          echo "Commit: $GITHUB_SHA"
+          echo "URL: https://norosa.app"
