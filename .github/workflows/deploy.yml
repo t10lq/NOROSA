@@ -1,0 +1,103 @@
+name: Deploy NOROSA to EC2
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-norosa
+  cancel-in-progress: false
+
+env:
+  VITE_RELAY_URL: wss://norosa.app/ws
+  EC2_HOST: ${{ vars.EC2_HOST || '13.38.54.47' }}
+  EC2_USER: ${{ vars.EC2_USER || 'ubuntu' }}
+
+jobs:
+  deploy:
+    name: Build → Ship → Activate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            server/package-lock.json
+
+      # ── Frontend ────────────────────────────────────────────────
+      - name: Install client dependencies
+        run: npm ci
+
+      - name: Build frontend
+        run: npm run build
+
+      - name: Assert relay URL inlined into bundle
+        run: grep -rl "wss://norosa.app/ws" dist/ || (echo "VITE_RELAY_URL was NOT inlined — check the build." && exit 1)
+
+      # ── Relay ───────────────────────────────────────────────────
+      - name: Install relay dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Build relay
+        working-directory: server
+        run: npm run build
+
+      # ── Stage release payload (static www + relay dist + lockfiles) ──
+      - name: Stage release payload
+        run: |
+          mkdir -p payload/www payload/relay
+          cp -a dist/. payload/www/
+          cp -a server/dist/. payload/relay/
+          cp server/package.json server/package-lock.json payload/relay/
+          tar -czf payload.tar.gz payload
+          echo "--- payload size ---"
+          du -sh payload.tar.gz
+
+      # ── SSH → EC2 ───────────────────────────────────────────────
+      - name: Configure SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+
+      - name: Import EC2 known hosts
+        env:
+          KNOWN_HOSTS: ${{ secrets.EC2_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          if [ -n "$KNOWN_HOSTS" ]; then
+            printf '%s\n' "$KNOWN_HOSTS" >> ~/.ssh/known_hosts
+            chmod 600 ~/.ssh/known_hosts
+          else
+            echo "::warning::EC2_KNOWN_HOSTS is empty — strict host-key checks will be skipped (accept-new)."
+          fi
+
+      - name: Upload release to EC2
+        run: |
+          scp -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            payload.tar.gz .github/scripts/remote-release.sh \
+            "$EC2_USER@$EC2_HOST:/tmp/"
+
+      - name: Activate release on EC2 (build on server kept separate)
+        run: |
+          set -e
+          ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$EC2_USER@$EC2_HOST" "bash /tmp/remote-release.sh"
+
+      - name: Verify live site
+        run: |
+          sleep 2
+          HTTP=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 https://norosa.app/ || true)
+          echo "https://norosa.app -> HTTP $HTTP"
+          if [ "$HTTP" != "200" ]; then
+            echo "::error::${HTTP:-no response} from https://norosa.app — deployment still needs attention."
+            exit 1
+          fi
