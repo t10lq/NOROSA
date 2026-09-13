@@ -41,6 +41,7 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
   const [, force] = useReducer(x => x + 1, 0)
 
   const isMobile = useMediaQuery('(max-width: 700px)')
+  const isTouch = useMediaQuery('(hover: none) and (pointer: coarse)')
   const speakerRouterRef = useRef<SpeakerRouter | null>(null)
   if (!speakerRouterRef.current) speakerRouterRef.current = new SpeakerRouter()
   const [speakerOn, setSpeakerOn] = useState(false)
@@ -356,10 +357,12 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: VidePath + (videoOff ? SlashPath : '') }} />
           </Btn>
-          <Btn onClick={toggleSpeaker} active={speakerOn} title={speakerOn ? 'Speakerphone — tap for earpiece' : 'Earpiece — tap for speakerphone'}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-              dangerouslySetInnerHTML={{ __html: speakerOn ? SpeakerPath : EarPath }} />
-          </Btn>
+          {isTouch && (
+            <Btn onClick={toggleSpeaker} active={speakerOn} title={speakerOn ? 'Speakerphone — tap for earpiece' : 'Earpiece — tap for speakerphone'}>
+              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+                dangerouslySetInnerHTML={{ __html: speakerOn ? SpeakerPath : EarPath }} />
+            </Btn>
+          )}
           <Btn onClick={() => setSharing(s => !s)} active={sharing} title={sharing ? 'Stop sharing' : 'Share screen'}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: SharePath }} />
