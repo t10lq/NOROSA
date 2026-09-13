@@ -130,7 +130,7 @@ export class MediaCallClient {
   private handlePresence(alias: string, online: boolean): void {
     if (this.disposed) return
     if (!online) {
-      this.closePeer(alias)
+this.closePeer(alias, 'presence-offline')
       this.knownPresence.delete(alias)
     } else if (alias !== this.svc.selfAlias) {
       this.knownPresence.add(alias)
@@ -158,7 +158,7 @@ export class MediaCallClient {
       void this.connectTo(p)
     }
     for (const alias of [...this.peers.keys()]) {
-      if (!peers.includes(alias)) this.closePeer(alias)
+      if (!peers.includes(alias)) this.closePeer(alias, 'reconcile-missing')
     }
   }
 
@@ -302,6 +302,9 @@ export class MediaCallClient {
       console.log('[debug] ensurePeer reuse', { peer })
       return existing
     }
+    // hadEntryBefore=false 4× for one alias = something wiped the entry between
+    // calls (closePeer) — the recreation loop, not a guard failure.
+    console.log('[debug] ensurePeer create', { peer, hadEntryBefore: !!existing })
     if (!insertableStreamsSupported()) return null
 
     const pc = new RTCPeerConnection({ iceServers: this.iceServers })
@@ -375,7 +378,7 @@ export class MediaCallClient {
         // muted badge correctly without waiting for a toggle.
         this.svc.sendCallSignal(peer, JSON.stringify({ p: 'mute', on: !this.audioEnabled }))
       }
-      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this.closePeer(peer)
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed') this.closePeer(peer, 'conn-failed')
     }
   }
 
@@ -402,7 +405,7 @@ export class MediaCallClient {
       s => saltResolve(s),
       err => {
         console.warn('[media] media-key negotiation failed:', err instanceof Error ? err.message : err)
-        this.closePeer(peer)
+        this.closePeer(peer, 'media-key-fail')
       },
     )
   }
@@ -532,7 +535,7 @@ export class MediaCallClient {
         await this.flushIce(entry)
       } catch (err) {
         console.warn('[media] answer failed:', err instanceof Error ? err.message : err)
-        this.closePeer(from)
+        this.closePeer(from, 'answer-fail')
       }
       return
     }
@@ -554,7 +557,7 @@ export class MediaCallClient {
         await this.flushIce(entry)
       } catch (err) {
         console.warn('[media] remote answer rejected:', err instanceof Error ? err.message : err)
-        this.closePeer(from)
+        this.closePeer(from, 'remote-answer-reject')
       }
       return
     }
@@ -662,7 +665,7 @@ export class MediaCallClient {
       if (!this.decryptFailing.has(peer)) return
       this.healCounts.set(peer, (this.healCounts.get(peer) ?? 0) + 1)
       console.warn(`[media] auto-healing pair ${peer} — fresh key agreement`)
-      this.closePeer(peer)
+      this.closePeer(peer, 'heal')
       this.decryptFailing.delete(peer)
       setTimeout(() => void this.connectTo(peer), 500)
     }, 4000)
@@ -910,8 +913,11 @@ export class MediaCallClient {
     return this.camTrack
   }
 
-  private closePeer(peer: string): void {
+  private closePeer(peer: string, reason = 'unknown'): void {
     const entry = this.peers.get(peer)
+    // Who closes a pair determines whether the recreation loop (offer×N for one
+    // alias) is a heal, a prune, or a transient failure — log it every time.
+    console.log('[debug] closePeer', { peer, reason, hadEntry: !!entry, pcState: entry?.pc.connectionState })
     if (!entry) return
     this.peers.delete(peer)
     this.mediaKeyCache.delete(peer)
@@ -947,7 +953,7 @@ export class MediaCallClient {
     if (this.reconnect) clearTimeout(this.reconnect)
     this.unsubPresence?.()
     this.stopScreenShare()
-    for (const peer of [...this.peers.keys()]) this.closePeer(peer)
+    for (const peer of [...this.peers.keys()]) this.closePeer(peer, 'dispose')
     this.micTrack?.stop()
     this.micTrack = null
     this.camTrack?.stop()
