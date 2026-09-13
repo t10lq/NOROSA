@@ -95,11 +95,7 @@ export async function attachSenderCrypto(sender: RTCRtpSender, entry: PeerEntry,
     if (encodedTransformModel() === 'modern') {
       // salt/ctr travel via structured clone in the options object.
       const ctr = Array.from(crypto.getRandomValues(new Uint8Array(8)))
-      const holder = sender as unknown as { transform: RTCRtpScriptTransform | null }
-      // Re-attach is legal (spec: transforms update dynamically) but assigning
-      // over an existing transform throws InvalidStateError — null it first.
-      if (holder.transform) holder.transform = null
-      holder.transform = modernTransform(
+      ;(sender as unknown as { transform: RTCRtpScriptTransform | null }).transform = modernTransform(
         workerFor(entry),
         { mode: 'encrypt', key: b64Encode(keyBytes), salt: b64Encode(salt), ctr },
       )

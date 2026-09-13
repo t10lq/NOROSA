@@ -301,7 +301,7 @@ export class MediaCallClient {
     const entry: PeerEntry = {
       pc, stream, audioSender: null, videoSender: null, shareSender: null,
       salts: new Promise(res => { saltResolve = res }),
-      encAttach: new Map(),
+      encAttach: new WeakSet(),
       iceBuffer: [],
       worker: null,
     }
@@ -318,6 +318,10 @@ export class MediaCallClient {
     // receiver plays it as its own track, keeping it separable from the mic.
     const sT = pc.addTransceiver('audio', { direction: 'sendrecv' })
     entry.shareSender = sT.sender
+    // Sanity: exactly three transceivers leave here. A larger count means a
+    // stray addTransceiver or a duplicated ensurePeer — the tell for mystery
+    // receiver accumulation on the far side.
+    console.log('[debug] peer pc created', { peer, transceivers: pc.getTransceivers().length })
 
     // LEGACY model: encoded streams MUST exist synchronously at negotiation;
     // Chromium throws "Too late to create encoded streams" once RTP is flowing.
@@ -536,7 +540,7 @@ export class MediaCallClient {
   }
 
   private async attachReceiverWhenReady(peer: string, entry: PeerEntry, receiver: RTCRtpReceiver): Promise<void> {
-    console.log('[debug] attachReceiver', { peer, receiverId: receiver.track?.id, alreadyAttached: this.attachedReceivers.has(receiver), pc: entry.pc.connectionState })
+    console.log('[debug] attachReceiver', { peer, receiverId: receiver.track?.id, pcReceivers: entry.pc.getReceivers().length, alreadyAttached: this.attachedReceivers.has(receiver), pc: entry.pc.connectionState })
     if (this.attachedReceivers.has(receiver)) return
     if (entry.pc.connectionState !== 'connected') return
     if (!receiver.track || receiver.track.readyState === 'ended') return
@@ -637,22 +641,16 @@ export class MediaCallClient {
     // left the peer with undecryptable frames (permanent black). Callers pass
     // the exact track they just replaceTrack()'d in instead.
     const t = track ?? sender.track
-    const attachedId = entry?.encAttach.get(sender)
-    const alreadyText = this.disposed || !entry
-      ? 'dead'
-      : attachedId === t?.id
-        ? 'same-track'
-        : 'new-track'
-    console.log('[debug] attachSend called', { peer, kind, hasTrack: !!t, already: alreadyText })
-    if (!entry || !t) return
-    // Re-encrypt whenever the sender's track CHANGES (camera/share toggles).
-    // Legacy model pipes frames through a track-agnostic encoded stream, so a
-    // second pipe there would double-encrypt — once-only remains correct.
-    if (attachedId === t.id) return
-    if (encodedTransformModel() === 'legacy' && attachedId !== undefined) return
+    const alreadyBool = this.disposed || !entry || entry.encAttach.has(sender)
+    console.log('[debug] attachSend called', { peer, kind, hasTrack: !!t, already: alreadyBool })
+    // One encrypt transform per sender for life — modern engines keep
+    // `sender.transform` across replaceTrack, so a re-assign mid-life would
+    // tear the worker pipe (InvalidStateError) and kill the video instead of
+    // healing it.
+    if (!entry || entry.encAttach.has(sender) || !t) return
     const failKey = `${peer}:${kind}`
     void entry.salts.then(async salts => {
-      if (this.disposed || !this.peers.get(peer) || entry.encAttach.get(sender) === t.id) return
+      if (this.disposed || !this.peers.get(peer) || entry.encAttach.has(sender)) return
       const ok = await attachSenderCrypto(sender, entry, salts.key, salts.send)
       if (!ok) {
         // createEncodedStreams is one-shot and now cached, so a retry can only
@@ -669,7 +667,7 @@ export class MediaCallClient {
         return
       }
       this.encryptFails.delete(failKey)
-      entry.encAttach.set(sender, t.id)
+      entry.encAttach.add(sender)
     }).catch(() => {})
   }
 
