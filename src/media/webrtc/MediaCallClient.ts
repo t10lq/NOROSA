@@ -348,8 +348,8 @@ export class MediaCallClient {
     pc.onconnectionstatechange = () => {
       this.events.onPeerState?.(peer, pc.connectionState)
       if (pc.connectionState === 'connected') {
-        if (entry.audioSender?.track) void this.attachSend(peer, entry.audioSender, 'audio')
-        if (entry.videoSender?.track && (this.videoEnabled || this.screenSharing)) void this.attachSend(peer, entry.videoSender, 'video')
+        if (entry.audioSender?.track) void this.attachSend(peer, entry.audioSender, 'audio', entry.audioSender.track)
+        if (entry.videoSender?.track && (this.videoEnabled || this.screenSharing)) void this.attachSend(peer, entry.videoSender, 'video', entry.videoSender.track)
         // Belt-and-suspenders decrypt: some browsers never fire ontrack for a
         // sendrecv m-line whose remote sender had no track at negotiation (our
         // camera is enabled AFTER connect). Without a decrypt transform here,
@@ -619,10 +619,15 @@ export class MediaCallClient {
     return this.decryptFailing.has(peer)
   }
 
-  private attachSend(peer: string, sender: RTCRtpSender, kind: 'audio' | 'video'): void {
+  private attachSend(peer: string, sender: RTCRtpSender, kind: 'audio' | 'video', track?: MediaStreamTrack | null): void {
     const entry = this.peers.get(peer)
-    console.log('[debug] attachSend called', { peer, kind, hasTrack: !!sender.track, already: this.disposed || !entry || entry.encAttach.has(sender) })
-    if (!entry || entry.encAttach.has(sender) || !sender.track) return
+    // Never trust `sender.track` here: some Chromium builds keep it null for a
+    // beat after replaceTrack(), which silently skipped the encrypt attach and
+    // left the peer with undecryptable frames (permanent black). Callers pass
+    // the exact track they just replaceTrack()'d in instead.
+    const t = track ?? sender.track
+    console.log('[debug] attachSend called', { peer, kind, hasTrack: !!t, already: this.disposed || !entry || entry.encAttach.has(sender) })
+    if (!entry || entry.encAttach.has(sender) || !t) return
     const failKey = `${peer}:${kind}`
     void entry.salts.then(async salts => {
       if (this.disposed || !this.peers.get(peer) || entry.encAttach.has(sender)) return
@@ -638,7 +643,7 @@ export class MediaCallClient {
           return
         }
         console.warn(`[media] encrypt attach failed for ${failKey} — retrying`)
-        setTimeout(() => this.attachSend(peer, sender, kind), 1500)
+        setTimeout(() => this.attachSend(peer, sender, kind, t), 1500)
         return
       }
       this.encryptFails.delete(failKey)
@@ -654,7 +659,7 @@ export class MediaCallClient {
     for (const [peer, entry] of this.peers) {
       if (!entry.audioSender) continue
       entry.audioSender.replaceTrack(track)
-      if (on) this.attachSend(peer, entry.audioSender, 'audio')
+      if (on) this.attachSend(peer, entry.audioSender, 'audio', track)
     }
     this.broadcastMicState()
     // The badge must reach EVERYONE in the room, even peers we have not
@@ -700,7 +705,7 @@ export class MediaCallClient {
         for (const [peer, entry] of this.peers) {
           if (!entry.videoSender) continue
           entry.videoSender.replaceTrack(cam)
-          this.attachSend(peer, entry.videoSender, 'video')
+          this.attachSend(peer, entry.videoSender, 'video', cam)
         }
       }
     } else {
@@ -722,7 +727,7 @@ export class MediaCallClient {
     if (!v || !entry.videoSender) return
     try {
       entry.videoSender.replaceTrack(v)
-      if (entry.videoSender.track) this.attachSend(peer, entry.videoSender, 'video')
+      this.attachSend(peer, entry.videoSender, 'video', v)
     } catch (err) {
       console.warn('[media] video declined while binding:', err instanceof Error ? err.message : err)
       this.events.onCamError?.(err instanceof Error ? err.message : String(err))
@@ -734,7 +739,7 @@ export class MediaCallClient {
     if (!this.screenSharing || !this.shareAudioTrack || !entry.shareSender) return
     try {
       entry.shareSender.replaceTrack(this.shareAudioTrack)
-      if (entry.shareSender.track) this.attachSend(peer, entry.shareSender, 'audio')
+      this.attachSend(peer, entry.shareSender, 'audio', this.shareAudioTrack)
     } catch (err) {
       console.warn('[media] share audio declined while binding:', err instanceof Error ? err.message : err)
     }
@@ -809,7 +814,7 @@ export class MediaCallClient {
       // Camera returns if video was on before the share; share audio detaches.
       const v = this.videoEnabled ? this.camTrack : null
       entry.videoSender?.replaceTrack(v)
-      if (v) this.attachSend(peer, entry.videoSender!, 'video')
+      if (v) this.attachSend(peer, entry.videoSender!, 'video', v)
       entry.shareSender?.replaceTrack(null)
     }
   }
