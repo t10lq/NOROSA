@@ -255,7 +255,7 @@ export class MediaCallClient {
     {
       const preferred = deviceId
         ? { deviceId: { exact: deviceId } }
-        : { frameRate: 30, height: { ideal: 1280 }, width: { ideal: 720 } }
+        : { frameRate: { ideal: 30 }, height: { ideal: 1280 }, width: { ideal: 720 } }
       console.log('[media] camera request:', JSON.stringify(preferred))
       try {
         stream = await this.withTimeout('getUserMedia-cam', navigator.mediaDevices.getUserMedia({ video: preferred, audio: false }))
@@ -372,7 +372,10 @@ export class MediaCallClient {
 
   private wireMedia(peer: string, entry: PeerEntry, saltResolve: (s: { key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }) => void): void {
     entry.pc.ontrack = e => {
-      if (e.track) entry.stream.addTrack(e.track)
+      if (e.track) {
+        console.log('[debug] ontrack addTrack', { peer, trackId: e.track.id, kind: e.track.kind, beforeCount: entry.stream.getTracks().length, isNew: !entry.stream.getTracks().includes(e.track) })
+        entry.stream.addTrack(e.track)
+      }
       this.events.onStream?.(peer, entry.stream)
       this.attachReceiverWhenReady(peer, entry, e.receiver)
     }
@@ -562,9 +565,12 @@ export class MediaCallClient {
       const salts = await entry.salts
       if (this.disposed || !this.peers.has(peer)) return
       let added = false
-      if (receiver.track && !entry.stream.getTracks().includes(receiver.track)) {
-        entry.stream.addTrack(receiver.track)
-        added = true
+      if (receiver.track) {
+        console.log('[debug] addTrack', { peer, trackId: receiver.track.id, trackKind: receiver.track.kind, beforeCount: entry.stream.getTracks().length, isNew: !entry.stream.getTracks().includes(receiver.track) })
+        if (!entry.stream.getTracks().includes(receiver.track)) {
+          entry.stream.addTrack(receiver.track)
+          added = true
+        }
       }
       if (streams) {
         attachReceiverCrypto(receiver, streams, entry, salts.key, salts.recv, () => this.noteFrameDrop(peer))
@@ -612,6 +618,7 @@ export class MediaCallClient {
 
   private attachSend(peer: string, sender: RTCRtpSender, kind: 'audio' | 'video'): void {
     const entry = this.peers.get(peer)
+    console.log('[debug] attachSend called', { peer, kind, hasTrack: !!sender.track, already: this.disposed || !entry || entry.encAttach.has(sender) })
     if (!entry || entry.encAttach.has(sender) || !sender.track) return
     const failKey = `${peer}:${kind}`
     void entry.salts.then(async salts => {
