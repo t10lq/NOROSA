@@ -252,8 +252,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setScreenSharing(nowOn)
         setLocalScreen(c.localScreenTrack())
         setShareSilent(nowOn && !c.shareAudioLive)
-      } catch {
+} catch (err) {
         // Picker dismissed / permission denied — nothing is live.
+        console.warn('[debug] setScreenShare threw', { enabled: on, error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack?.slice(0, 200) : undefined })
         console.log('[debug] ctx screenSharing -> false (setScreenShare rejected)')
         setScreenSharing(false)
         setLocalScreen(null)
