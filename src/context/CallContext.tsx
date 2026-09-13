@@ -144,6 +144,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       },
       onScreenShareStopped: () => {
         // The presenter killed the share via the browser's own stop bar.
+        console.log('[debug] ctx screenSharing -> false (onended)')
         setScreenSharing(false)
         setLocalScreen(null)
         setShareSilent(false)
@@ -171,6 +172,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setRemoteStreams(new Map())
       setPeerMics(new Map())
       setPeerStates(new Map())
+      console.log('[debug] ctx provider teardown screenSharing -> false')
       setScreenSharing(false)
       setLocalScreen(null)
       setSharePending(false)
@@ -246,11 +248,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
       try {
         await c.setScreenShare(on)
         const nowOn = c.screenOn
+        console.log('[debug] ctx screenSharing ->', nowOn, 'localScreen', c.localScreenTrack() ? 'live' : 'null', 'shareSilent', c.shareAudioLive ? 'audio' : 'no-audio')
         setScreenSharing(nowOn)
         setLocalScreen(c.localScreenTrack())
         setShareSilent(nowOn && !c.shareAudioLive)
       } catch {
         // Picker dismissed / permission denied — nothing is live.
+        console.log('[debug] ctx screenSharing -> false (setScreenShare rejected)')
         setScreenSharing(false)
         setLocalScreen(null)
         setShareSilent(false)

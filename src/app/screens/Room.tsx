@@ -18,6 +18,24 @@ import { TileVideo } from '../tiles/TileVideo'
 export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; onExit: () => void }) {
   const { service } = useE2e()
   const calls = useCalls()
+  const dbgShare = useRef({ s: calls.screenSharing, ls: !!calls.localScreen })
+  dbgShare.current = { s: calls.screenSharing, ls: !!calls.localScreen }
+  useEffect(() => {
+    console.log('[debug] Room mount — screenSharing', dbgShare.current.s, 'localScreen', dbgShare.current.ls)
+    const prev = { ...dbgShare.current }
+    const t = setInterval(() => {
+      const cur = dbgShare.current
+      if (cur.s !== prev.s || cur.ls !== prev.ls) {
+        console.log('[debug] Room screenSharing changed ->', cur.s, 'localScreen', cur.ls)
+        prev.s = cur.s
+        prev.ls = cur.ls
+      }
+    }, 300)
+    return () => {
+      clearInterval(t)
+      console.log('[debug] Room unmount — screenSharing', dbgShare.current.s, 'localScreen', dbgShare.current.ls)
+    }
+  }, [])
   const [chatOpen, setChatOpen] = useState(false)
   const [showExit, setShowExit] = useState(false)
   const [ctrlVis, setCtrlVis] = useState(true)

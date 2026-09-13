@@ -372,7 +372,7 @@ export class MediaCallClient {
 
   private wireMedia(peer: string, entry: PeerEntry, saltResolve: (s: { key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }) => void): void {
     entry.pc.ontrack = e => {
-      entry.stream.addTrack(e.track)
+      if (e.track) entry.stream.addTrack(e.track)
       this.events.onStream?.(peer, entry.stream)
       this.attachReceiverWhenReady(peer, entry, e.receiver)
     }
@@ -530,7 +530,10 @@ export class MediaCallClient {
   }
 
   private async attachReceiverWhenReady(peer: string, entry: PeerEntry, receiver: RTCRtpReceiver): Promise<void> {
+    console.log('[debug] attachReceiver', { peer, receiverId: receiver.track?.id, alreadyAttached: this.attachedReceivers.has(receiver), pc: entry.pc.connectionState })
     if (this.attachedReceivers.has(receiver)) return
+    if (entry.pc.connectionState !== 'connected') return
+    if (!receiver.track || receiver.track.readyState === 'ended') return
     this.attachedReceivers.add(receiver)
     // Create the encoded streams SYNCHRONOUSLY (this runs inside the ontrack
     // task, before the first await) — LEGACY model only. MODERN engines wire
@@ -558,12 +561,19 @@ export class MediaCallClient {
       // would decrypt against a zero salt and drop every frame (black video).
       const salts = await entry.salts
       if (this.disposed || !this.peers.has(peer)) return
+      let added = false
+      if (receiver.track && !entry.stream.getTracks().includes(receiver.track)) {
+        entry.stream.addTrack(receiver.track)
+        added = true
+      }
       if (streams) {
         attachReceiverCrypto(receiver, streams, entry, salts.key, salts.recv, () => this.noteFrameDrop(peer))
       } else {
         attachReceiverCrypto(receiver, null as unknown as EncodedStreams, entry, salts.key, salts.recv, () => this.noteFrameDrop(peer))
       }
       console.log(`[media] decrypt attached — ${peer}`)
+      if (added) this.events.onStream?.(peer, entry.stream)
+      console.log('[debug] receiver attached', { peer, tracks: entry.stream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, readyState: t.readyState, id: t.id })) })
     } catch (err) {
       console.warn(`[media] decrypt attach deferred for ${peer}:`, err instanceof Error ? err.message : err)
     }
@@ -834,6 +844,7 @@ export class MediaCallClient {
     this.mediaKeyCache.delete(peer)
     this.decryptFailing.delete(peer)
     this.healCounts.delete(peer)
+    this.attachedReceivers = new WeakSet<RTCRtpReceiver>()
     for (const k of [...this.encryptFails.keys()]) if (k.startsWith(peer)) this.encryptFails.delete(k)
     entry.pc.onicecandidate = null
     entry.pc.ontrack = null
