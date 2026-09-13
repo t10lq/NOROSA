@@ -1,14 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { HedgehogLogo } from './components/HedgehogLogo'
 import { LoadingScreen } from './components/LoadingScreen'
-import { E2eProvider, useE2e } from './context/E2eContext'
-import { CallProvider } from './context/CallContext'
+import { E2eProvider } from './context/E2eContext'
 import { openDeviceKey } from './e2ee/vault'
 import { formatRoomCode, generateRoomCode, hashRoomCode, isValidCode, normalizeRoomCode } from './e2ee/roomcode'
 import { RELAY_URL } from './config/env'
 import { generateAlias } from './app/ui/namegen'
 import { Lobby } from './app/screens/Lobby'
-import { Room } from './app/screens/Room'
+import { RoomGate } from './app/screens/boot/RoomGate'
 
 const φ = 1.618033988749895
 
@@ -25,118 +23,6 @@ function SecurityLine({ progress }: { progress: number }) {
         background: progress === 100 ? 'rgba(240,238,233,0.18)' : '#B3241F',
         transition: 'width 0.8s cubic-bezier(0.4,0,0.2,1), background 1.2s ease',
       }} />
-    </div>
-  )
-}
-
-// ── Room gate ─────────────────────────────────────────────────────
-// The room UI must NEVER mount unless the relay actually accepted us and the
-// crypto engine is ready. Until then the user sees a boot loader; a refused
-// join shows a plain rejection screen — no grid, no controls, no "room".
-function RoomGate({ roomCode, alias, onExit }: { roomCode: string; alias: string; onExit: () => void }) {
-  const { isReady, error } = useE2e()
-
-  if (error) {
-    return isJoinRefusal(error)
-      ? <JoinRejected reason={joinRefusalReason(error)} onBack={onExit} />
-      : <BootFailure message={error} onBack={onExit} />
-  }
-
-  if (!isReady) return <RoomBootLoader />
-
-  return (
-    <CallProvider>
-      <Room roomCode={roomCode} alias={alias} onExit={onExit} />
-    </CallProvider>
-  )
-}
-
-function isJoinRefusal(raw: string): boolean {
-  return /room_not_found|bad_room_key|rate_limited|did not answer/.test(raw)
-}
-
-// Turn a raw relay refusal into a message the user can act on.
-function joinRefusalReason(raw: string): string {
-  const m = raw.toLowerCase()
-  if (m.includes('room_not_found')) return 'No room was created with that code — the room may have expired after everyone left.'
-  if (m.includes('bad_room_key')) return 'The relay refused that code as malformed. Enter a valid 18-digit code exactly as shared.'
-  if (m.includes('rate_limited')) return 'Too many join attempts from this browser in one minute — wait a minute, then try again.'
-  if (m.includes('did not answer')) return 'The relay did not answer the join request. Check your connection and try again.'
-  return raw
-}
-
-function RoomBootLoader() {
-  const [dots, setDots] = useState('')
-  useEffect(() => {
-    const iv = setInterval(() => setDots(d => d.length >= 3 ? '' : d + '.'), 400)
-    return () => clearInterval(iv)
-  }, [])
-  return (
-    <div style={{
-      height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', background: '#0A0A0B', gap: 18,
-    }}>
-      <p style={{ fontFamily: "'Space Mono'", fontSize: 13, letterSpacing: '0.14em', color: 'rgba(240,238,233,0.55)', margin: 0 }}>
-        ENTERING ENCRYPTED ROOM{dots}
-      </p>
-      <p style={{ fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.1em', color: '#2E2E35', margin: 0 }}>
-        HANDSHAKE · RATE-LIMIT CHECK · IDENTITY EXCHANGE
-      </p>
-    </div>
-  )
-}
-
-function JoinRejected({ reason, onBack }: { reason: string; onBack: () => void }) {
-  return (
-    <div style={{
-      height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', background: '#0A0A0B', padding: '0 24px', gap: 16, textAlign: 'center',
-    }}>
-      {/* App logo snug inside a translucent prohibition ring; the slash crosses the exact centre */}
-      <div style={{ position: 'relative', width: 88, height: 88, marginBottom: 6 }}>
-        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', opacity: 0.88 }}>
-          <HedgehogLogo size={60} />
-        </div>
-        <svg width="88" height="88" style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
-          <circle cx="44" cy="44" r="32" fill="none" stroke="rgba(179,36,31,0.55)" strokeWidth="3.5" />
-          <line x1="22.8" y1="22.8" x2="65.2" y2="65.2" stroke="rgba(179,36,31,0.6)" strokeWidth="4.5" strokeLinecap="round" />
-        </svg>
-      </div>
-      <h2 style={{ fontFamily: "'Space Mono'", fontSize: 18, fontWeight: 700, letterSpacing: '0.12em', color: '#F0EEE9', margin: 0 }}>
-        ROOM NOT FOUND
-      </h2>
-      <p style={{ fontSize: 13, color: 'rgba(240,238,233,0.6)', maxWidth: 340, lineHeight: 1.55, margin: 0 }}>{reason}</p>
-      <button onClick={onBack} style={{
-        marginTop: 8, padding: '12px 34px', background: 'rgba(240,238,233,0.08)',
-        border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10,
-        color: '#F0EEE9', fontSize: 14, fontFamily: 'Outfit', fontWeight: 500, cursor: 'pointer',
-        transition: 'all 0.18s',
-      }}
-        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,238,233,0.14)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.2)' }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(240,238,233,0.08)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)' }}
-      >BACK TO LOBBY</button>
-    </div>
-  )
-}
-
-function BootFailure({ message, onBack }: { message: string; onBack: () => void }) {
-  return (
-    <div style={{
-      height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', background: '#0A0A0B', padding: '0 24px', gap: 16, textAlign: 'center',
-    }}>
-      <h2 style={{ fontFamily: "'Space Mono'", fontSize: 18, fontWeight: 700, letterSpacing: '0.12em', color: '#F0EEE9', margin: 0 }}>
-        COULD NOT START ENCRYPTION
-      </h2>
-      <p style={{ fontSize: 13, color: 'rgba(240,238,233,0.6)', maxWidth: 340, lineHeight: 1.55, margin: 0 }}>{message}</p>
-      <button onClick={onBack} style={{
-        marginTop: 8, padding: '12px 34px', background: 'rgba(240,238,233,0.08)',
-        border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10,
-        color: '#F0EEE9', fontSize: 14, fontFamily: 'Outfit', fontWeight: 500, cursor: 'pointer',
-      }}
-        onMouseEnter={e => { e.currentTarget.style.background = 'rgba(240,238,233,0.14)' }}
-        onMouseLeave={e => { e.currentTarget.style.background = 'rgba(240,238,233,0.08)' }}
-      >BACK TO LOBBY</button>
     </div>
   )
 }
