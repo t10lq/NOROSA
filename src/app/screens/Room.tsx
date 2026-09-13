@@ -353,7 +353,7 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: MicPath + (muted ? SlashPath : '') }} />
           </Btn>
-          <Btn onClick={() => calls.setCamOn(!videoOff, selCam !== 'default' ? selCam : undefined)} active={!videoOff && !calls.camBlocked} pending={calls.camPending || (calls.camOn && !calls.localCamera)} title={videoOff ? 'Enable video' : 'Disable video'}>
+          <Btn onClick={() => calls.setCamOn(!calls.camOn, selCam !== 'default' ? selCam : undefined)} active={!videoOff && !calls.camBlocked} pending={calls.camPending || (calls.camOn && !calls.localCamera)} title={videoOff ? 'Enable video' : 'Disable video'}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: VidePath + (videoOff ? SlashPath : '') }} />
           </Btn>
