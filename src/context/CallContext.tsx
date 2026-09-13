@@ -6,15 +6,15 @@ import { MediaCallClient, defaultIceServers, probeEncodedStreamsCaps, type Encod
 /**
  * Media-plane bridge.
  *
- * Owns exactly ONE MediaCallClient per E2eEncryptionService lifetime and
- * exposes just enough surface for the room UI: mute/video toggles (real
- * replaceTrack calls — the connection never drops), the remote stream per
- * peer for rendering, and the shared local camera preview track.
+ * Owns exactly ONE MediaCallClient per E2eEncryptionService lifetime (audio
+ * only) and exposes just enough surface for the room UI: the mute toggle
+ * (real replaceTrack call — the connection never drops) and the remote stream
+ * per peer for rendering.
  *
  * Permission handling: a denied microphone never kills the call (the audio
  * m-line is negotiated with a null track; granting later injects it via
- * replaceTrack). Blocked grants are surfaced as micBlocked / camBlocked so
- * the room can show clear hints instead of a silent failure.
+ * replaceTrack). Blocked grants are surfaced as micBlocked so the room can
+ * show a clear hint instead of a silent failure.
  *
  * When the browser lacks RTCRtpScriptTransform the provider stays live but
  * supported=false; the room then renders without media rather than crashing.
@@ -30,40 +30,19 @@ export interface CallContextValue {
   remoteStreams: ReadonlyMap<string, MediaStream>
   /** Per-peer mic muted state, driven by explicit mute signaling. */
   peerMics: ReadonlyMap<string, boolean>
-  /** Peers whose inbound frames are actively failing decryption (black video). */
+  /** Peers whose inbound frames are actively failing decryption. */
   decryptDrops: ReadonlyMap<string, boolean>
   micOn: boolean
-  camOn: boolean
-  /** A screen share is live on our own side. */
-  screenSharing: boolean
   /** A capture request is in flight (permission prompt open). */
-  camPending: boolean
   micPending: boolean
-  sharePending: boolean
-  /** Shared local camera track (null until video is enabled). */
-  localCamera: MediaStreamTrack | null
-  /** Local screen-share track while a share is live. */
-  localScreen: MediaStreamTrack | null
-  /** True when the browser refused the microphone/camera, until granted. */
+  /** True when the browser refused the microphone, until granted. */
   micBlocked: boolean
-  camBlocked: boolean
   /** Browser-provided reason for the refusal (NotAllowedError etc.). */
   micError: string | null
-  camError: string | null
   peerStates: ReadonlyMap<string, RTCPeerConnectionState>
   toggleMic: () => void
-  toggleCam: () => void
   setMicOn: (on: boolean) => void
-  setCamOn: (on: boolean, deviceId?: string) => void
-  /** Start/stop screen sharing (video + separate system-audio channel). */
-  setScreenShare: (on: boolean) => void
-  /** Restart the share picker right away (used by the no-audio warning). */
-  retryScreenShare: () => void
-  /** Share is live but carries no system audio (Entire-screen pick). */
-  shareSilent: boolean
-  /** Share system-audio volume 0–1 (independent of the mic). */
-  setShareVolume: (volume: number) => void
-  reconfigureDevices: (micId: string | null, camId: string | null) => void
+  reconfigureDevices: (micId: string | null) => void
 }
 
 const CallContext = createContext<CallContextValue | null>(null)
@@ -76,25 +55,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [decryptDrops, setDecryptDrops] = useState<ReadonlyMap<string, boolean>>(new Map())
   const [peerStates, setPeerStates] = useState<ReadonlyMap<string, RTCPeerConnectionState>>(new Map())
   const [micOn, setMicOnState] = useState(true)
-  const [camOn, setCamOnState] = useState(false)
-  const [screenSharing, setScreenSharing] = useState(false)
-  const [shareSilent, setShareSilent] = useState(false)
-  const [localCamera, setLocalCamera] = useState<MediaStreamTrack | null>(null)
-  const [localScreen, setLocalScreen] = useState<MediaStreamTrack | null>(null)
   const [micBlocked, setMicBlocked] = useState(false)
-  const [camBlocked, setCamBlocked] = useState(false)
   const [micError, setMicError] = useState<string | null>(null)
-  const [camError, setCamError] = useState<string | null>(null)
-  const [camPending, setCamPending] = useState(false)
   const [micPending, setMicPending] = useState(false)
-  const [sharePending, setSharePending] = useState(false)
   const [supportProbe, setSupportProbe] = useState<EncodedCapsProbe | null>(null)
 
   const mediaRef = useRef<MediaCallClient | null>(null)
   const micOnRef = useRef(micOn)
-  const camOnRef = useRef(camOn)
   micOnRef.current = micOn
-  camOnRef.current = camOn
 
   useEffect(() => {
     if (!service || !isReady) return
@@ -138,17 +106,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
         setMicOnState(false)
         micOnRef.current = false
       },
-      onCamError: (message) => {
-        setCamBlocked(true)
-        setCamError(message ?? 'Permission denied')
-      },
-      onScreenShareStopped: () => {
-        // The presenter killed the share via the browser's own stop bar.
-        console.log('[debug] ctx screenSharing -> false (onended)')
-        setScreenSharing(false)
-        setLocalScreen(null)
-        setShareSilent(false)
-      },
     }
 
     let client: MediaCallClient | null = null
@@ -172,11 +129,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setRemoteStreams(new Map())
       setPeerMics(new Map())
       setPeerStates(new Map())
-      console.log('[debug] ctx provider teardown screenSharing -> false')
-      setScreenSharing(false)
-      setLocalScreen(null)
-      setSharePending(false)
-      setShareSilent(false)
     }
   }, [service, isReady])
 
@@ -207,94 +159,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
 
   const toggleMic = useCallback(() => setMicOn(!micOnRef.current), [setMicOn])
 
-  const setCamOn = useCallback((on: boolean, deviceId?: string) => {
-    const prev = camOnRef.current
-    if (on) setCamPending(true)
-    setCamOnState(on)
-    if (on) setLocalCamera(null)
-    const c = mediaRef.current
-    if (!c) {
-      setCamPending(false)
-      if (on) setCamBlocked(true)
-      return
-    }
-    void (async () => {
-      try {
-        await c.setVideoEnabled(on, deviceId)
-        setLocalCamera(c.localCameraTrack())
-        setCamBlocked(false)
-        setCamError(null)
-      } catch {
-        setCamOnState(prev)
-        camOnRef.current = prev
-        setLocalCamera(null)
-        setCamBlocked(true)
-      } finally {
-        setCamPending(false)
-      }
-    })()
-  }, [])
-
-  const toggleCam = useCallback(() => setCamOn(!camOnRef.current), [setCamOn])
-
-  const setScreenShare = useCallback((on: boolean) => {
-    const c = mediaRef.current
-    if (!c) {
-      setSharePending(false)
-      return
-    }
-    setSharePending(true)
-    void (async () => {
-      try {
-        await c.setScreenShare(on)
-        const nowOn = c.screenOn
-        console.log('[debug] ctx screenSharing ->', nowOn, 'localScreen', c.localScreenTrack() ? 'live' : 'null', 'shareSilent', c.shareAudioLive ? 'audio' : 'no-audio')
-        setScreenSharing(nowOn)
-        setLocalScreen(c.localScreenTrack())
-        setShareSilent(nowOn && !c.shareAudioLive)
-} catch (err) {
-        // Picker dismissed / permission denied — nothing is live.
-        console.warn('[debug] setScreenShare threw', { enabled: on, error: err instanceof Error ? err.message : String(err), stack: err instanceof Error ? err.stack?.slice(0, 200) : undefined })
-        console.log('[debug] ctx screenSharing -> false (setScreenShare rejected)')
-        setScreenSharing(false)
-        setLocalScreen(null)
-        setShareSilent(false)
-      } finally {
-        setSharePending(false)
-      }
-    })()
-  }, [])
-
-  const retryScreenShare = useCallback(() => {
-    const c = mediaRef.current
-    if (!c) return
-    setSharePending(true)
-    void (async () => {
-      try {
-        await c.setScreenShare(false)
-        // Let the stop settle before the picker reopens (Chromium can latch on
-        // to the just-freed capture surface).
-        await new Promise(r => setTimeout(r, 100))
-        await c.setScreenShare(true)
-        const nowOn = c.screenOn
-        setScreenSharing(nowOn)
-        setLocalScreen(c.localScreenTrack())
-        setShareSilent(nowOn && !c.shareAudioLive)
-      } catch {
-        setScreenSharing(false)
-        setLocalScreen(null)
-        setShareSilent(false)
-      } finally {
-        setSharePending(false)
-      }
-    })()
-  }, [])
-
-  const setShareVolume = useCallback((volume: number) => {
-    mediaRef.current?.setShareVolume(volume)
-  }, [])
-
-  const reconfigureDevices = useCallback((micId: string | null, camId: string | null) => {
+  const reconfigureDevices = useCallback((micId: string | null) => {
     void (async () => {
       const c = mediaRef.current
       if (!c) return
@@ -305,16 +170,6 @@ export function CallProvider({ children }: { children: ReactNode }) {
           setMicError(null)
         } catch {
           setMicBlocked(true)
-        }
-      }
-      if (camOnRef.current) {
-        try {
-          await c.setVideoEnabled(true, camId ?? 'default')
-          setLocalCamera(c.localCameraTrack())
-          setCamBlocked(false)
-          setCamError(null)
-        } catch {
-          setCamBlocked(true)
         }
       }
     })()
@@ -330,28 +185,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
       decryptDrops,
       peerStates,
       micOn,
-      camOn,
-      screenSharing,
-      camPending,
       micPending,
-      sharePending,
-      localCamera,
-      localScreen,
       micBlocked,
-      camBlocked,
       micError,
-      camError,
       toggleMic,
-      toggleCam,
       setMicOn,
-      setCamOn,
-      setScreenShare,
-      retryScreenShare,
-      shareSilent,
-      setShareVolume,
       reconfigureDevices,
     }),
-    [media, remoteStreams, peerMics, decryptDrops, peerStates, micOn, camOn, screenSharing, camPending, micPending, sharePending, localCamera, localScreen, micBlocked, camBlocked, micError, camError, toggleMic, toggleCam, setMicOn, setCamOn, setScreenShare, retryScreenShare, shareSilent, setShareVolume, reconfigureDevices],
+    [media, remoteStreams, peerMics, decryptDrops, peerStates, micOn, micPending, micBlocked, micError, toggleMic, setMicOn, reconfigureDevices],
   )
 
   return <CallContext.Provider value={value}>{children}</CallContext.Provider>

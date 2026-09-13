@@ -2,19 +2,14 @@ export type PeerEntry = {
   pc: RTCPeerConnection
   stream: MediaStream
   audioSender: RTCRtpSender | null
-  videoSender: RTCRtpSender | null
-  /** Second audio transceiver dedicated to screen-share system audio. It is
-   *  negotiated (track null) from the start like the mic line, so starting a
-   *  share is a plain replaceTrack — no renegotiation. */
-  shareSender: RTCRtpSender | null
   /** Resolves with the media key + per-direction SFrame salts once the key
    *  lands. Crypto attachment must AWAIT this — never attach with a zero key. */
   salts: Promise<{ key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }>
-  /** Encrypt transform attached per SENDER (mic, camera/share, share-audio).
-   *  Once attached it encrypts whichever track the sender carries — modern
-   *  engines KEEP sender.transform across replaceTrack(), so a once-only guard
-   *  is both safe and required: re-assigning a second transform on the same
-   *  tick tears the worker's pipe and throws InvalidStateError. */
+  /** Encrypt transform attached per SENDER. Once attached it encrypts
+   *  whichever (audio) track the sender carries — modern engines KEEP
+   *  sender.transform across replaceTrack(), so a once-only guard is both
+   *  safe and required: re-assigning a second transform on the same tick
+   *  tears the worker's pipe and throws InvalidStateError. */
   encAttach: WeakSet<RTCRtpSender>
   /** Fingerprint (sdp length + tail) of the LAST received offer, to drop
    *  duplicate deliveries that would otherwise renegotiate and duplicate

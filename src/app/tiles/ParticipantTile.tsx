@@ -6,13 +6,11 @@ import { aliasColor } from '../ui/aliasColor'
 import { MicPath, SlashPath } from '../ui/icons'
 
 export interface Participant {
-  id: string; alias: string; muted: boolean; videoOff: boolean; speaking: boolean
+  id: string; alias: string; muted: boolean; speaking: boolean
   /** Inbound frames are actively failing to decrypt (client-side black video). */
   dropping: boolean
   /** Remote mix for a peer tile, or the local camera preview for 'self'. */
   stream: MediaStream | null
-  /** The self tile is showing the screen share (no mirror, no camera). */
-  screencast?: boolean
 }
 
 // ── Expand a live tile to the real browser fullscreen ─────────────
@@ -28,6 +26,7 @@ export function toggleTileFullscreen(el: HTMLElement | null): void {
 // ── Participant tile ──────────────────────────────────────────────
 export function ParticipantTile({ p, large, router }: { p: Participant; large?: boolean; router?: SpeakerRouter }) {
   const rootRef = useRef<HTMLDivElement | null>(null)
+  const hasVideo = !!p.stream && p.stream.getVideoTracks().length > 0
   return (
     <div ref={rootRef} style={{
       position: 'relative', display: 'flex', alignItems: 'center',
@@ -37,9 +36,9 @@ export function ParticipantTile({ p, large, router }: { p: Participant; large?: 
       borderRadius: '6px',
       transition: 'border-color 0.3s ease',
     }}>
-      {p.id === 'self' || !router
-        ? p.stream && <TileVideo stream={p.stream} mirrored={p.id === 'self' && !p.screencast} muted={p.id === 'self'} />
-        : <SpeakerVideo router={router} peer={p.id} stream={p.stream} />}
+      {hasVideo && (p.id === 'self' || !router
+        ? p.stream && <TileVideo stream={p.stream} mirrored={p.id === 'self'} muted={p.id === 'self'} />
+        : <SpeakerVideo router={router} peer={p.id} stream={p.stream} />)}
       {p.dropping && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none',
@@ -53,7 +52,7 @@ export function ParticipantTile({ p, large, router }: { p: Participant; large?: 
           }}>DARK — DECRYPTING</span>
         </div>
       )}
-      {p.stream && (
+      {hasVideo && p.stream && (
         <button onClick={e => { e.stopPropagation(); toggleTileFullscreen(rootRef.current) }}
           className="tap" title="Fullscreen" style={{
             position: 'absolute', top: 6, right: 6, zIndex: 3,
@@ -64,7 +63,7 @@ export function ParticipantTile({ p, large, router }: { p: Participant; large?: 
           }}>⛶</button>
       )}
       <span style={{
-        fontFamily: "'Space Mono'", color: p.stream ? 'transparent' : 'rgba(240,238,233,0.45)',
+        fontFamily: "'Space Mono'", color: hasVideo && p.stream ? 'transparent' : 'rgba(240,238,233,0.45)',
         fontSize: large ? '2.2rem' : '1rem', letterSpacing: '0.06em', zIndex: 1, pointerEvents: 'none',
       }}>
         {p.alias.slice(0, 2).toUpperCase()}

@@ -1,15 +1,14 @@
 /**
- * NOROSA Media plane — E2EE WebRTC audio/video (Insertable Streams).
+ * NOROSA Media plane — E2EE WebRTC audio (Insertable Streams).
  *
- * Design (mirrors the "audio-only call that upgrades to video without ever
- * dropping the connection" requirement):
+ * Design:
  *
  *   • One RTCPeerConnection per peer (deterministic offerer = the party with
  *     the lexicographically smaller relay alias — no glare, ever).
- *   • Every offer prepares BOTH an audio sender (real mic track) and a video
- *     transceiver whose track starts `null`. Toggling video is then a plain
- *     `sender.replaceTrack(cameraTrack | null)` — NO renegotiation, no call
- *     teardown. The video m-line is already there.
+ *   • Every offer prepares a single audio m-line whose track may start null
+ *     (mic granted later). Toggling the mic is then a plain
+ *     `sender.replaceTrack(micTrack | null)` — NO renegotiation, no call
+ *     teardown.
  *   • AES-GCM-256 (WebCrypto) over RTP frames via RTCRtpScriptTransform, in
  *     an SFrame-like framing:
  *         header = 8-byte big-endian frame counter || 1-byte keyId
@@ -36,22 +35,17 @@ import { insertableStreamsSupported } from './caps'
 import { fallbackIceServers } from './ice'
 import { deriveSalt, type EncodedStreamHost, type EncodedStreams, type PeerEntry } from './sframe'
 import { attachReceiverCrypto, attachSenderCrypto, encodedTransformModel, receiverStreamCache, senderStreamCache } from './transforms'
-import { AudioMixer } from '../../streaming/audioMixer'
 
 export interface MediaCallEvents {
-  /** A peer's remote mix mutated (audio/video track added). */
+  /** A peer's remote mix mutated (audio track added). */
   onStream?: (peerAlias: string, stream: MediaStream) => void
   onPeerState?: (peerAlias: string, state: RTCPeerConnectionState) => void
-  /** Microphone/camera grant failed — `message` is the browser's reason. */
+  /** Microphone grant failed — `message` is the browser's reason. */
   onMicError?: (message: string) => void
-  onCamError?: (message: string) => void
   /** A peer toggled their mic — drives the remote muted badge. */
   onPeerMic?: (peerAlias: string, muted: boolean) => void
-  /** A peer's inbound video/audio is actively failing to decrypt (2s cadence). */
+  /** A peer's inbound audio is actively failing to decrypt (2s cadence). */
   onFrameDrop?: (peerAlias: string) => void
-  /** The presenter's screen share was stopped by the browser's own stop bar
-   *  (track.onended) — the UI must un-light the share control. */
-  onScreenShareStopped?: () => void
 }
 
 // ── Signaling payloads (inside the double-ratchet envelope) ───────
@@ -69,20 +63,8 @@ export class MediaCallClient {
   private disposed = false
   private reconnect?: ReturnType<typeof setTimeout>
   private micTrack: MediaStreamTrack | null = null
-  private camTrack: MediaStreamTrack | null = null
   private micDeviceId: string | null = null
-  private camDeviceId: string | null = null
   private audioEnabled = true
-  private videoEnabled = false
-
-  // Screen share — an independent media path next to the camera (separate
-  // video track, separate system-audio channel on its own transceiver).
-  private screenSharing = false
-  private screenTrack: MediaStreamTrack | null = null
-  private shareAudioTrack: MediaStreamTrack | null = null
-  /** WebAudio pipeline shaping only the share's system audio (mic stays raw). */
-  private mixer: AudioMixer | null = null
-  private shareVolume = 1
   private mediaKeyCache = new Map<string, Uint8Array>()
   private encryptFails = new Map<string, number>()
   private knownPresence = new Set<string>()
@@ -241,47 +223,6 @@ this.closePeer(alias, 'presence-offline')
     return this.micTrack
   }
 
-  private async ensureCam(deviceId: string | null): Promise<MediaStreamTrack> {
-    if (this.camTrack && this.camDeviceId === deviceId && this.camTrack.readyState === 'live') return this.camTrack
-    this.camTrack?.stop()
-    this.camTrack = null
-    this.camDeviceId = deviceId
-
-    // A single strict getUserMedia can die on quirky webcams (Overconstrained-
-    // /NotReadableError). Always try the FULL constraints first, then a BARE
-    // capture with no constraints at all — the OS default device satisfies it.
-    let stream: MediaStream | null = null
-    let lastErr: string = 'unknown failure'
-    {
-      const preferred = deviceId
-        ? { deviceId: { exact: deviceId } }
-        : { frameRate: { ideal: 30 }, height: { ideal: 1280 }, width: { ideal: 720 } }
-      console.log('[media] camera request:', JSON.stringify(preferred))
-      try {
-        stream = await this.withTimeout('getUserMedia-cam', navigator.mediaDevices.getUserMedia({ video: preferred, audio: false }))
-      } catch (err) {
-        lastErr = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
-        console.warn('[media] camera request failed, retrying bare:', lastErr)
-      }
-    }
-    if (!stream) {
-      try {
-        stream = await this.withTimeout('getUserMedia-cam-bare', navigator.mediaDevices.getUserMedia({ video: deviceId ? { deviceId: { exact: deviceId } } : true, audio: false }))
-      } catch (err) {
-        lastErr = err instanceof Error ? `${err.name}: ${err.message}` : String(err)
-      }
-    }
-    if (!stream || !stream.getVideoTracks()[0]) {
-      console.warn('[media] camera unavailable:', lastErr)
-      this.events.onCamError?.(lastErr)
-      throw new Error('Camera unavailable.')
-    }
-    this.camTrack = stream.getVideoTracks()[0]!
-    const settings = this.camTrack.getSettings()
-    console.log('[media] camera ON — deviceId=%s %sx%s', settings.deviceId, settings.width, settings.height)
-    return this.camTrack
-  }
-
   /**
    * Create (once) the structural half of a peer's connection: PC, stream,
    * both m-lines, ICE/SDP/media wiring. SYNCHRONOUS except for the wire
@@ -311,7 +252,7 @@ this.closePeer(alias, 'presence-offline')
     const stream = new MediaStream()
     let saltResolve: (s: { key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }) => void = () => {}
     const entry: PeerEntry = {
-      pc, stream, audioSender: null, videoSender: null, shareSender: null,
+      pc, stream, audioSender: null,
       salts: new Promise(res => { saltResolve = res }),
       encAttach: new WeakSet(),
       lastOffer: '',
@@ -322,17 +263,10 @@ this.closePeer(alias, 'presence-offline')
     this.peers.set(peer, entry)
 
     // M-lines BEFORE any await (see method doc — adding them late mangles the
-    // SDP map and turns calls half-open / video black).
+    // SDP map and turns calls half-open).
     const aT = pc.addTransceiver('audio', { direction: 'sendrecv' })
     entry.audioSender = aT.sender
-    const vT = pc.addTransceiver('video', { direction: 'sendrecv' })
-    entry.videoSender = vT.sender
-    // Dedicated share-audio m-line (system audio). Pre-negotiated with a null
-    // track exactly like the mic, so a share later is replaceTrack-only. The
-    // receiver plays it as its own track, keeping it separable from the mic.
-    const sT = pc.addTransceiver('audio', { direction: 'sendrecv' })
-    entry.shareSender = sT.sender
-    // Sanity: exactly three transceivers leave here. A larger count means a
+    // Sanity: exactly one transceiver leaves here. A larger count means a
     // stray addTransceiver or a duplicated ensurePeer — the tell for mystery
     // receiver accumulation on the far side.
     console.log('[debug] peer pc created', { peer, transceivers: pc.getTransceivers().length })
@@ -341,13 +275,11 @@ this.closePeer(alias, 'presence-offline')
     // Chromium throws "Too late to create encoded streams" once RTP is flowing.
     // MODERN model: sender.transform assignment works anytime — skip.
     if (encodedTransformModel() === 'legacy') {
-      for (const sender of [aT.sender, vT.sender, sT.sender]) {
-        try {
-          const s = (sender as unknown as EncodedStreamHost).createEncodedStreams()
-          senderStreamCache.set(sender, s)
-        } catch {
-          /* negotiated later; attachSend will surface it */
-        }
+      try {
+        const s = (aT.sender as unknown as EncodedStreamHost).createEncodedStreams()
+        senderStreamCache.set(aT.sender, s)
+      } catch {
+        /* negotiated later; attachSend will surface it */
       }
     }
 
@@ -368,11 +300,12 @@ this.closePeer(alias, 'presence-offline')
       if (pc.connectionState === 'connected') {
         entry.offerInFlight = false
         if (entry.audioSender?.track) void this.attachSend(peer, entry.audioSender, 'audio', entry.audioSender.track)
-        if (entry.videoSender?.track && (this.videoEnabled || this.screenSharing)) void this.attachSend(peer, entry.videoSender, 'video', entry.videoSender.track)
         // Belt-and-suspenders decrypt: some browsers never fire ontrack for a
-        // sendrecv m-line whose remote sender had no track at negotiation (our
-        // camera is enabled AFTER connect). Without a decrypt transform here,
-        // that peer's encrypted frames decode as garbage → permanent black.
+        // sendrecv m-line whose remote sender had no track at negotiation. An
+        // audio sender starts muted (mic granted later) and the decrypted
+        // frames would decode as garbage. Without a decrypt transform here,
+        // that peer's encrypted frames never render. The same repair covers
+        // late-granted mics for a peer connected during a mute.
         void this.attachAllReceivers(peer, entry)
         // Sync our current mic state so a freshly-connected peer renders the
         // muted badge correctly without waiting for a toggle.
@@ -445,15 +378,6 @@ this.closePeer(alias, 'presence-offline')
       console.warn('[media] mic declined on connect from:', err instanceof Error ? err.message : err)
       this.events.onMicError?.(err instanceof Error ? err.message : String(err))
     }
-
-    // Video must follow the SAME rule: if the camera was enabled BEFORE this
-    // peer existed (typical for the room creator), no setVideoEnabled() will
-    // ever run for this newcomer otherwise, and the sender track stays null →
-    // the creator's video would be the one permanent black tile. The screen
-    // share obeys the same rule — a peer joining mid-share gets the live
-    // screen + its system-audio channel immediately.
-    this.bindVideo(peer, entry)
-    this.bindShareAudio(peer, entry)
 
     if (this.svc.amOfferer(peer) && entry.pc.signalingState === 'stable') {
       if (entry.offerInFlight) {
@@ -762,163 +686,8 @@ this.closePeer(alias, 'presence-offline')
     return [...new Set([...keyed, ...this.svc.listOnlinePeers()].filter(a => a !== self))]
   }
 
-  /** Toggle camera. replaceTrack(null↔camera) — connection never drops.
-   *  While a screen share is live the camera is only captured for the local
-   *  preview — the screen keeps occupying the video senders; on stop the
-   *  camera (if still enabled) takes back over. */
-  async setVideoEnabled(on: boolean, deviceId?: string): Promise<void> {
-    this.videoEnabled = on
-    if (on) {
-      const cam = await this.ensureCam(deviceId ?? this.camDeviceId)
-      if (!this.screenSharing) {
-        for (const [peer, entry] of this.peers) {
-          if (!entry.videoSender) continue
-          entry.videoSender.replaceTrack(cam)
-          this.attachSend(peer, entry.videoSender, 'video', cam)
-        }
-      }
-    } else {
-      if (!this.screenSharing) {
-        for (const entry of this.peers.values()) entry.videoSender?.replaceTrack(null)
-      }
-      this.camTrack?.stop()
-      this.camTrack = null
-    }
-  }
-
-  /** The outbound picture right now: screen while sharing, else camera. */
-  private currentVideoTrack(): MediaStreamTrack | null {
-    return this.screenTrack ?? (this.videoEnabled ? this.camTrack : null)
-  }
-
-  private bindVideo(peer: string, entry: PeerEntry): void {
-    const v = this.currentVideoTrack()
-    if (!v || !entry.videoSender) return
-    try {
-      entry.videoSender.replaceTrack(v)
-      this.attachSend(peer, entry.videoSender, 'video', v)
-    } catch (err) {
-      console.warn('[media] video declined while binding:', err instanceof Error ? err.message : err)
-      this.events.onCamError?.(err instanceof Error ? err.message : String(err))
-    }
-  }
-
-  /** System audio of an active share onto the dedicated share-audio sender. */
-  private bindShareAudio(peer: string, entry: PeerEntry): void {
-    if (!this.screenSharing || !this.shareAudioTrack || !entry.shareSender) return
-    try {
-      entry.shareSender.replaceTrack(this.shareAudioTrack)
-      this.attachSend(peer, entry.shareSender, 'audio', this.shareAudioTrack)
-    } catch (err) {
-      console.warn('[media] share audio declined while binding:', err instanceof Error ? err.message : err)
-    }
-  }
-
-  /**
-   * Start/stop screen share — a parallel path to the camera. The video goes
-   * onto the existing video senders (E2E encrypted like anything else), the
-   * captured system audio is shaped by a WebAudio mixer and sent on the
-   * dedicated share-audio transceiver, fully separate from the trailing mic.
-   * No renegotiation anywhere along this path.
-   */
-  async setScreenShare(on: boolean): Promise<void> {
-    if (on) {
-      if (this.screenSharing) return
-      const stream = await this.withTimeout('getDisplayMedia', navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }), 60000)
-      const video = stream.getVideoTracks()[0]
-      if (!video) throw new Error('No screen track available.')
-      const sys = stream.getAudioTracks()[0] ?? null
-      this.screenTrack = video
-      this.shareAudioTrack = null
-      this.screenSharing = true
-      // The browser's own "Stop sharing" control kills the track — fold that
-      // into our state instead of silently showing a dead share.
-      video.onended = () => {
-        if (!this.screenSharing) return
-        this.stopScreenShare()
-        this.events.onScreenShareStopped?.()
-      }
-      if (sys) {
-        try {
-          const mix = await this.ensureMixer()
-          await mix.prime()
-          mix.addSource('system', sys)
-          mix.setSourceLevel('system', this.shareVolume)
-          this.shareAudioTrack = mix.outputTrack
-        } catch (err) {
-          console.warn('[media] share-audio pipeline failed — sharing video only:', err instanceof Error ? err.message : err)
-          sys.stop()
-          this.shareAudioTrack = null
-        }
-      }
-      for (const [peer, entry] of [...this.peers]) {
-        this.bindVideo(peer, entry)
-        this.bindShareAudio(peer, entry)
-      }
-      return
-    }
-    this.stopScreenShare()
-  }
-
-  private async ensureMixer(): Promise<AudioMixer> {
-    if (!this.mixer) {
-      const created = AudioMixer.create()
-      if (!created) throw new Error('WebAudio unavailable for share audio.')
-      this.mixer = created
-    }
-    return this.mixer
-  }
-
-  private stopScreenShare(): void {
-    this.screenSharing = false
-    if (this.screenTrack) this.screenTrack.onended = null
-    this.screenTrack?.stop()
-    this.screenTrack = null
-    if (this.mixer) {
-      this.mixer.removeSource('system')
-      this.mixer.removeSource('mic')
-    }
-    this.shareAudioTrack = null
-    for (const [peer, entry] of [...this.peers]) {
-      // Camera returns if video was on before the share; share audio detaches.
-      const v = this.videoEnabled ? this.camTrack : null
-      entry.videoSender?.replaceTrack(v)
-      if (v) this.attachSend(peer, entry.videoSender!, 'video', v)
-      entry.shareSender?.replaceTrack(null)
-    }
-  }
-
-  /** Drive the share's system-audio level 0–1 (independent of the mic). */
-  setShareVolume(volume: number): void {
-    this.shareVolume = Math.min(1, Math.max(0, volume))
-    if (this.mixer) this.mixer.setSourceLevel('system', this.shareVolume)
-  }
-
-  get screenOn(): boolean {
-    return this.screenSharing
-  }
-
-  /** True while the share actually carries system audio (a tab/window was
-   *  picked and Chromium honoured it). Entire-screen picks report no audio
-   *  track even when their "Share audio" checkbox is ticked. */
-  get shareAudioLive(): boolean {
-    return this.shareAudioTrack !== null
-  }
-
-  localScreenTrack(): MediaStreamTrack | null {
-    return this.screenTrack
-  }
-
-  get videoOn(): boolean {
-    return this.videoEnabled
-  }
-
   get audioOn(): boolean {
     return this.audioEnabled
-  }
-
-  localCameraTrack(): MediaStreamTrack | null {
-    return this.camTrack
   }
 
   private closePeer(peer: string, reason = 'unknown'): void {
@@ -946,28 +715,18 @@ this.closePeer(alias, 'presence-offline')
     }
   }
 
-  /** Restart the shared camera/mic tracks (device picker changed). */
-  async reconfigureDevices(micId: string | null, camId: string | null): Promise<void> {
+  /** Restart the mic track (device picker changed). */
+  async reconfigureDevices(micId: string | null): Promise<void> {
     await this.setMicOn(this.audioEnabled, micId ?? this.micDeviceId ?? 'default')
-    if (this.videoEnabled) {
-      await this.setVideoEnabled(true, camId ?? this.camDeviceId ?? 'default')
-    } else {
-      this.camDeviceId = camId
-    }
   }
 
   dispose(): void {
     this.disposed = true
     if (this.reconnect) clearTimeout(this.reconnect)
     this.unsubPresence?.()
-    this.stopScreenShare()
     for (const peer of [...this.peers.keys()]) this.closePeer(peer, 'dispose')
     this.micTrack?.stop()
     this.micTrack = null
-    this.camTrack?.stop()
-    this.camTrack = null
-    this.mixer?.close()
-    this.mixer = null
     this.started = false
   }
 

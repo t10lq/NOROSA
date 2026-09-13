@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { MicPath, VidePath, SpeakerPath, GearPath } from '../ui/icons'
+import { MicPath, SpeakerPath, GearPath } from '../ui/icons'
 
 // ── Settings modal ───────────────────────────────────────────────
 interface AudioDeviceRowProps {
   label: string
-  kind: 'in' | 'out' | 'cam'
+  kind: 'in' | 'out'
   selected: boolean
   onSelect: () => void
   hint?: 'default' | 'ready' | 'blocked'
@@ -12,7 +12,7 @@ interface AudioDeviceRowProps {
 
 function AudioDeviceRow({ label, kind, selected, onSelect, hint }: AudioDeviceRowProps) {
   const [hov, setHov] = useState(false)
-  const icon = kind === 'in' ? MicPath : kind === 'cam' ? VidePath : SpeakerPath
+  const icon = kind === 'in' ? MicPath : SpeakerPath
   return (
     <button onClick={onSelect} onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)} style={{
       width: '100%', display: 'flex', alignItems: 'center', gap: 12,
@@ -34,9 +34,9 @@ function AudioDeviceRow({ label, kind, selected, onSelect, hint }: AudioDeviceRo
             letterSpacing: '0.08em', color: hint === 'ready' ? 'rgba(240,238,233,0.35)' : (hint === 'blocked' ? '#B3241F' : '#2E2E35'),
           }}>
             {hint === 'ready'
-              ? (kind === 'cam' ? 'CAMERA PATH READY' : 'AUDIO PATH READY')
+              ? 'AUDIO PATH READY'
               : hint === 'blocked'
-                ? (kind === 'cam' ? 'CAMERA BLOCKED' : 'MICROPHONE BLOCKED')
+                ? 'MICROPHONE BLOCKED'
                 : 'DEFAULT SOURCE'}
           </span>
         )}
@@ -54,36 +54,30 @@ function AudioDeviceRow({ label, kind, selected, onSelect, hint }: AudioDeviceRo
   )
 }
 
-export function SettingsModal({ open, onClose, input, output, camera, selIn, selOut, selCam, micHint, camHint, onSelectIn, onSelectOut, onSelectCam }: {
+export function SettingsModal({ open, onClose, input, output, selIn, selOut, micHint, onSelectIn, onSelectOut }: {
   open: boolean
   onClose: () => void
   input: MediaDeviceInfo[]
   output: MediaDeviceInfo[]
-  camera: MediaDeviceInfo[]
   selIn: string
   selOut: string
-  selCam: string
   micHint: 'idle' | 'ready' | 'blocked'
-  camHint: 'idle' | 'ready' | 'blocked'
   onSelectIn: (id: string) => void
   onSelectOut: (id: string) => void
-  onSelectCam: (id: string) => void
 }) {
-  const [tab, setTab] = useState<'out' | 'in' | 'cam'>('in')
+  const [tab, setTab] = useState<'out' | 'in'>('in')
   if (!open) return null
 
   const tabs = [
     { id: 'out' as const, label: 'OUTPUT', icon: SpeakerPath },
     { id: 'in' as const, label: 'INPUT', icon: MicPath },
-    { id: 'cam' as const, label: 'CAMERA', icon: VidePath },
   ]
 
-  const list = tab === 'out' ? output : tab === 'in' ? input : camera
-  const sel = tab === 'out' ? selOut : tab === 'in' ? selIn : selCam
-  const onSel = tab === 'out' ? onSelectOut : tab === 'in' ? onSelectIn : onSelectCam
-  const hk = tab === 'in' ? micHint : tab === 'cam' ? camHint : 'idle'
-  const hintRow = tab === 'out' ? undefined : (hk === 'ready' ? 'ready' as const : hk === 'blocked' ? 'blocked' as const : undefined)
-  const emptyLabel = tab === 'out' ? 'output device' : tab === 'in' ? 'microphone' : 'camera'
+  const list = tab === 'out' ? output : input
+  const sel = tab === 'out' ? selOut : selIn
+  const onSel = tab === 'out' ? onSelectOut : onSelectIn
+  const hintRow = tab === 'out' ? undefined : (micHint === 'ready' ? 'ready' as const : micHint === 'blocked' ? 'blocked' as const : undefined)
+  const emptyLabel = tab === 'out' ? 'output device' : 'microphone'
 
   return (
     <div style={{
@@ -134,7 +128,7 @@ export function SettingsModal({ open, onClose, input, output, camera, selIn, sel
               margin: '14px 0 0', textAlign: 'center',
               fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.1em',
               color: '#2E2E35',
-            }}>NO {tab === 'out' ? 'OUTPUT' : tab === 'in' ? 'INPUT' : 'CAMERA'} FOUND</p>
+            }}>NO {tab === 'out' ? 'OUTPUT' : 'INPUT'} FOUND</p>
           )}
           {list.map(d => (
             <AudioDeviceRow key={d.deviceId} label={d.label || `Unnamed ${emptyLabel}`} kind={tab} selected={sel === d.deviceId} onSelect={() => onSel(d.deviceId)} hint={hintRow} />

@@ -6,39 +6,17 @@ import { useE2e } from '../../context/E2eContext'
 import { useCalls } from '../../context/CallContext'
 import { getChatPeers, subscribeRoomChat } from '../../store/roomChat'
 import { SpeakerRouter } from '../../media/speakerRouter'
-import { MicPath, VidePath, SharePath, ChatPath, ExitPath, SlashPath, CopyPath, CheckPath, GearPath, SpeakerPath, EarPath } from '../ui/icons'
+import { MicPath, ChatPath, ExitPath, SlashPath, CopyPath, CheckPath, GearPath, SpeakerPath, EarPath } from '../ui/icons'
 import { useMediaQuery } from '../ui/useMediaQuery'
 import { Btn } from '../controls/Btn'
 import { ExitConfirm } from '../controls/ExitConfirm'
 import { SettingsModal } from '../controls/SettingsModal'
 import { Participant, ParticipantTile } from '../tiles/ParticipantTile'
-import { TileVideo } from '../tiles/TileVideo'
 
 // ── Room ──────────────────────────────────────────────────────────
 export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; onExit: () => void }) {
   const { service } = useE2e()
   const calls = useCalls()
-  const dbgShare = useRef({ s: calls.screenSharing, ls: !!calls.localScreen })
-  dbgShare.current = { s: calls.screenSharing, ls: !!calls.localScreen }
-  useEffect(() => {
-    console.log('[debug] Room mount — screenSharing', dbgShare.current.s, 'localScreen', dbgShare.current.ls)
-    const prev = { ...dbgShare.current }
-    const t = setInterval(() => {
-      const cur = dbgShare.current
-      if (cur.s !== prev.s || cur.ls !== prev.ls) {
-        console.log('[debug] Room screenSharing changed ->', cur.s, 'localScreen', cur.ls)
-        prev.s = cur.s
-        prev.ls = cur.ls
-      }
-    }, 300)
-    return () => {
-      clearInterval(t)
-      console.log('[debug] Room unmount — screenSharing', dbgShare.current.s, 'localScreen', dbgShare.current.ls)
-    }
-  }, [])
-  useEffect(() => {
-    console.log('[debug] share button', { screenSharing: calls.screenSharing, sharePending: calls.sharePending, shareSilent: calls.shareSilent, danger: calls.screenSharing })
-  }, [calls.screenSharing, calls.sharePending, calls.shareSilent])
   const [chatOpen, setChatOpen] = useState(false)
   const [showExit, setShowExit] = useState(false)
   const [ctrlVis, setCtrlVis] = useState(true)
@@ -53,13 +31,10 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
     setSameDeviceTab(service?.sameDeviceDuplicateOpen() ?? false)
     return () => clearInterval(poll)
   }, [service])
-  const [mediaDevices, setMediaDevices] = useState<{ input: MediaDeviceInfo[]; output: MediaDeviceInfo[]; camera: MediaDeviceInfo[] }>({ input: [], output: [], camera: [] })
+  const [mediaDevices, setMediaDevices] = useState<{ input: MediaDeviceInfo[]; output: MediaDeviceInfo[] }>({ input: [], output: [] })
   const [selIn, setSelIn] = useState('default')
   const [selOut, setSelOut] = useState('default')
-  const [selCam, setSelCam] = useState('default')
-  const [shareVol, setShareVol] = useState(1)
   const [micHint, setMicHint] = useState<'idle' | 'ready' | 'blocked'>('idle')
-  const [camHint, setCamHint] = useState<'idle' | 'ready' | 'blocked'>('idle')
   const [, force] = useReducer(x => x + 1, 0)
 
   const isMobile = useMediaQuery('(max-width: 700px)')
@@ -87,29 +62,21 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
   const selfName = service?.selfAlias ?? alias
 
   const muted = !calls.micOn
-  const videoOff = !calls.camOn
 
   // Real grid: you + every device actually holding keys in this room. No
   // hardcoded guests — whoever is not really here does not render.
   const realPeers = getChatPeers()
-  // During a screen share the self tile shows the screen on stage (streamer
-  // style) and the camera, if live, drops into a small corner PiP instead.
-  const screenLive = calls.screenSharing && !!calls.localScreen
+  // Audio-only session — no local video preview; remote tiles show initials.
   const all: Participant[] = [
     {
-      id: 'self', alias: selfName, muted, videoOff: screenLive ? false : videoOff,
-      speaking: false, dropping: false, screencast: screenLive || undefined,
-      stream: screenLive
-        ? new MediaStream([calls.localScreen!])
-        : calls.localCamera
-            ? new MediaStream([calls.localCamera])
-            : null,
+      id: 'self', alias: selfName, muted,
+      speaking: false, dropping: false,
+      stream: null,
     },
     ...realPeers.map(p => {
       const remote = calls.remoteStreams.get(p) ?? null
       return {
         id: `peer-${p}`, alias: p, muted: calls.peerMics.get(p) ?? false,
-        videoOff: !remote || remote.getVideoTracks().length === 0,
         dropping: calls.decryptDrops.get(p) ?? false,
         speaking: false,
         stream: remote,
@@ -130,10 +97,9 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
   // Anti-leak protection instead comes from the watermark overlay below
   // (every captured frame carries alias + room code + clock) plus the
   // duplicate-tab screen. No timer fakes an alert.
-  // The permission prompts fire here, once, on room entry: microphone first
-  // (the call needs it the moment a peer is online). The camera is only
-  // requested at first video toggle — a listening call should never have
-  // silently grabbed the webcam. Denials surface as hints, not failures.
+  // The permission prompt fires here, once, on room entry: microphone (the
+  // call needs it the moment a peer is online). Denials surface as a hint,
+  // not a failure.
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -155,7 +121,6 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
         setMediaDevices({
           input: all.filter(d => d.kind === 'audioinput'),
           output: all.filter(d => d.kind === 'audiooutput'),
-          camera: all.filter(d => d.kind === 'videoinput'),
         })
         if (!audioOk) setMicHint('blocked')
       }
@@ -175,7 +140,6 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
         setMediaDevices({
           input: all.filter(d => d.kind === 'audioinput'),
           output: all.filter(d => d.kind === 'audiooutput'),
-          camera: all.filter(d => d.kind === 'videoinput'),
         })
       }).catch(() => {})
     }
@@ -187,9 +151,6 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
   useEffect(() => {
     if (calls.micBlocked) setMicHint('blocked')
   }, [calls.micBlocked])
-  useEffect(() => {
-    if (calls.camBlocked) setCamHint('blocked')
-  }, [calls.camBlocked])
 
   const selectInput = (id: string) => {
     setSelIn(id)
@@ -201,24 +162,9 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
       .then(ms => {
         ms.getTracks().forEach(t => t.stop())
         setMicHint('ready')
-        calls.reconfigureDevices(id, null)
+        calls.reconfigureDevices(id)
       })
       .catch(() => setMicHint('blocked'))
-  }
-
-  const selectCamera = (id: string) => {
-    setSelCam(id)
-    if (id === 'default') { setCamHint('idle'); return }
-    const exact = navigator.mediaDevices?.getUserMedia({ video: { deviceId: { exact: id } }, audio: false })
-    if (!exact) { setCamHint('blocked'); return }
-    exact
-      .catch(() => navigator.mediaDevices!.getUserMedia({ video: { deviceId: { ideal: id } }, audio: false }))
-      .then(ms => {
-        ms.getTracks().forEach(t => t.stop())
-        setCamHint('ready')
-        calls.reconfigureDevices(null, id)
-      })
-      .catch(() => setCamHint('blocked'))
   }
 
   const copyCode = () => {
@@ -264,39 +210,11 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
           SECOND TAB OF THIS BROWSER DETECTED — SAME IDENTITY, MEDIA BETWEEN THEM STAYS BLACK
         </div>
       )}
-      {screenLive && (
-        <div style={{
-          position: 'fixed', top: sameDeviceTab ? 124 : 70, left: '50%', transform: 'translateX(-50%)', zIndex: 90,
-          background: 'rgba(28,12,10,0.95)', border: '1px solid rgba(179,36,31,0.6)',
-          borderRadius: 10, padding: '11px 18px', fontFamily: "'Space Mono'", fontSize: 11,
-          letterSpacing: '0.05em', color: '#E5A2A0', backdropFilter: 'blur(20px)',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.6)', whiteSpace: 'nowrap',
-        }}>
-          YOU ARE SHARING YOUR SCREEN — END-TO-END ENCRYPTED
-        </div>
-      )}
-      {calls.shareSilent && (
-        <div style={{
-          position: 'fixed', top: sameDeviceTab ? 186 : (screenLive ? 124 : 70), left: '50%', transform: 'translateX(-50%)', zIndex: 95,
-          background: 'rgba(40,30,12,0.95)', border: '1px solid rgba(220,160,60,0.55)',
-          borderRadius: 10, padding: '10px 16px', fontFamily: "'Space Mono'", fontSize: 10,
-          letterSpacing: '0.04em', color: '#E8C27A', backdropFilter: 'blur(20px)',
-          boxShadow: '0 8px 40px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', gap: 12,
-          maxWidth: '92vw',
-        }}>
-          <span>NO SYSTEM AUDIO — ENTIRE SCREEN SHARES VIDEO ONLY · PICK A TAB/WINDOW FOR SOUND</span>
-          <button onClick={calls.retryScreenShare} className="tap" style={{
-            flexShrink: 0, background: 'rgba(220,160,60,0.14)', border: '1px solid rgba(220,160,60,0.5)',
-            color: '#E8C27A', padding: '5px 12px', borderRadius: 7, cursor: 'pointer',
-            fontFamily: "'Space Mono'", fontSize: 9, letterSpacing: '0.08em',
-          }}>RETRY WITH TAB</button>
-        </div>
-      )}
       {showExit && <ExitConfirm onConfirm={onExit} onCancel={() => setShowExit(false)} />}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)}
-        input={mediaDevices.input} output={mediaDevices.output} camera={mediaDevices.camera}
-        selIn={selIn} selOut={selOut} selCam={selCam} micHint={micHint} camHint={camHint}
-        onSelectIn={selectInput} onSelectOut={selectOutput} onSelectCam={selectCamera} />
+        input={mediaDevices.input} output={mediaDevices.output}
+        selIn={selIn} selOut={selOut} micHint={micHint}
+        onSelectIn={selectInput} onSelectOut={selectOutput} />
 
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
 
@@ -341,21 +259,11 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
           position: 'relative',
         }}>
           {all.map(p => <ParticipantTile key={p.id} p={p} large={all.length === 1} router={speakerRouterRef.current ?? undefined} />)}
-          {/* Presenter PiP — the camera keeps talking while the screen is on stage */}
-          {screenLive && calls.localCamera && (
-            <div style={{
-              position: 'absolute', right: 14, bottom: 26, zIndex: 5, width: 172, height: 108,
-              borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.18)',
-              boxShadow: '0 10px 30px rgba(0,0,0,0.5)', background: '#0a0a0b',
-            }}>
-              <TileVideo stream={new MediaStream([calls.localCamera])} mirrored muted />
-            </div>
-          )}
           {/* Leak watermark — every recorded/captured frame is traceable to this
               identity, room and moment. True "is it being recorded?" detection is
               not exposed to web pages, so we mark instead of guess. */}
           <div style={{
-            position: 'absolute', left: screenLive ? 12 : undefined, right: screenLive ? undefined : 12,
+            position: 'absolute', right: 12,
             bottom: 10, zIndex: 4, pointerEvents: 'none', userSelect: 'none',
             fontFamily: "'Space Mono'", fontSize: 9, letterSpacing: '0.12em',
             color: 'rgba(240,238,233,0.18)', opacity: 0.75,
@@ -364,47 +272,33 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
           </div>
         </div>
 
-        {/* Capture in flight — instant feedback for the camera button */}
-        {(calls.camPending || calls.micPending || calls.sharePending) && (
+        {/* Capture in flight — instant feedback for the mic button */}
+        {calls.micPending && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px',
             background: 'rgba(30,30,36,0.6)', border: '1px solid rgba(255,255,255,0.12)',
             fontSize: 11, fontFamily: "'Space Mono'", letterSpacing: '0.06em', color: 'rgba(240,238,233,0.8)',
           }}>
             <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#F0EEE9', animation: 'breathe 0.9s ease infinite' }} />
-            {calls.sharePending
-              ? 'SHARING SCREEN — pick what to share…'
-              : calls.camPending
-                ? 'ENABLING CAMERA — check for the permission prompt…'
-                : 'ENABLING MICROPHONE…'}
+            ENABLING MICROPHONE…
           </div>
         )}
 
         {/* Device failures — the button must never fail silently */}
-        {(calls.micError || calls.camError) && (
+        {calls.micError && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 10, padding: '7px 12px',
             background: 'rgba(120,40,35,0.55)', border: '1px solid rgba(255,90,80,0.35)',
             fontSize: 11, fontFamily: "'Space Mono'", letterSpacing: '0.06em', color: '#FFB4AB',
           }}>
             <span style={{ flex: 1 }}>
-              {calls.camError
-                ? `CAMERA BLOCKED · ${calls.camError}`
-                : `MIC BLOCKED · ${calls.micError}`}
+              MIC BLOCKED · {calls.micError}
               <span style={{ opacity: 0.7 }}> — allow access for this site, then: </span>
             </span>
-            {calls.camError && (
-              <button onClick={() => calls.setCamOn(true, selCam !== 'default' ? selCam : undefined)}
-                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.25)', color: '#F0EEE9', padding: '3px 10px', fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.08em', cursor: 'pointer' }}>
-                RETRY CAMERA
-              </button>
-            )}
-            {calls.micError && (
-              <button onClick={calls.toggleMic}
-                style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.25)', color: '#F0EEE9', padding: '3px 10px', fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.08em', cursor: 'pointer' }}>
-                RETRY MIC
-              </button>
-            )}
+            <button onClick={calls.toggleMic}
+              style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.25)', color: '#F0EEE9', padding: '3px 10px', fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.08em', cursor: 'pointer' }}>
+              RETRY MIC
+            </button>
           </div>
         )}
 
@@ -424,31 +318,11 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: MicPath + (muted ? SlashPath : '') }} />
           </Btn>
-          <Btn onClick={() => calls.setCamOn(!calls.camOn, selCam !== 'default' ? selCam : undefined)} active={!videoOff && !calls.camBlocked} pending={calls.camPending || (calls.camOn && !calls.localCamera)} title={videoOff ? 'Enable video' : 'Disable video'}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-              dangerouslySetInnerHTML={{ __html: VidePath + (videoOff ? SlashPath : '') }} />
-          </Btn>
           {isTouch && (
             <Btn onClick={toggleSpeaker} active={speakerOn} title={speakerOn ? 'Speakerphone — tap for earpiece' : 'Earpiece — tap for speakerphone'}>
               <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
                 dangerouslySetInnerHTML={{ __html: speakerOn ? SpeakerPath : EarPath }} />
             </Btn>
-          )}
-          <Btn onClick={() => calls.setScreenShare(!calls.screenSharing)} active={calls.screenSharing}
-            danger={calls.screenSharing} pending={calls.sharePending} disabled={calls.sharePending}
-            title={calls.screenSharing
-              ? 'Stop sharing'
-              : 'Share screen — Tab/Window shares with sound · Entire screen shares video only'}>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-              dangerouslySetInnerHTML={{ __html: SharePath }} />
-          </Btn>
-          {calls.screenSharing && !isTouch && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-              <span style={{ fontFamily: "'Space Mono'", fontSize: 9, letterSpacing: '0.1em', color: 'rgba(240,238,233,0.5)', whiteSpace: 'nowrap' }}>SOUND</span>
-              <input type="range" min={0} max={100} value={Math.round(shareVol * 100)}
-                onChange={e => { const v = Number(e.target.value) / 100; setShareVol(v); calls.setShareVolume(v) }}
-                style={{ width: 82, accentColor: '#F0EEE9', cursor: 'pointer' }} />
-            </div>
           )}
           <Btn onClick={() => setChatOpen(c => !c)} active={chatOpen} title="Chat">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
