@@ -31,7 +31,7 @@
  * is unavailable.
  */
 
-import { E2eEncryptionService } from '../E2eEncryptionService'
+import { E2eEncryptionService } from '../../crypto/E2eEncryptionService'
 import { insertableStreamsSupported } from './caps'
 import { fallbackIceServers } from './ice'
 import { deriveSalt, type EncodedStreamHost, type EncodedStreams, type PeerEntry } from './sframe'

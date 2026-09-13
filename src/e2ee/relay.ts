@@ -1,4 +1,4 @@
-import type { OneTimePrekey, PublicKeyBundle, WireCall, WireIn, WireKeysResult, WireMsg, WireOut, WireUpload } from './types'
+import type { OneTimePrekey, PublicKeyBundle, WireCall, WireIn, WireKeysResult, WireMsg, WireOut, WireUpload } from '../crypto/types'
 
 /**
  * RelayLink — WebSocket transport to the NOROSA blind gate.

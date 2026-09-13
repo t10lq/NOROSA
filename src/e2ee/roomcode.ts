@@ -13,7 +13,7 @@
  * The relay holds a hash it can compare, never a secret it can disclose.
  */
 
-import { utf8ToBytes } from './encoding'
+import { utf8ToBytes } from '../crypto/encoding'
 
 const CODE_BYTES = 9
 const CODE_HEX_LEN = CODE_BYTES * 2

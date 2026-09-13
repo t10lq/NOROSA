@@ -4,7 +4,7 @@
  * RoomComponent panel. Subscribers re-render on any change.
  */
 
-import type { DecryptedMessage, SafetyStatus } from '../e2ee/E2eEncryptionService'
+import type { DecryptedMessage, SafetyStatus } from '../crypto/E2eEncryptionService'
 
 export interface ChatMessage {
   id: string

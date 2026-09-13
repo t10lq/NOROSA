@@ -1,4 +1,4 @@
-import { b64Encode } from '../encoding'
+import { b64Encode } from '../../crypto/encoding'
 import { importMediaKey, makeFrameTransformer, type EncodedFrame, type EncodedStreamHost, type EncodedStreams, type PeerEntry } from './sframe'
 
 /** Blob-worker transform (fallback runtimes). */

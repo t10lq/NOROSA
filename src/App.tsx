@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { LoadingScreen } from './app/components/LoadingScreen'
 import { E2eProvider } from './context/E2eContext'
-import { openDeviceKey } from './e2ee/vault'
+import { openDeviceKey } from './crypto/vault'
 import { formatRoomCode, generateRoomCode, hashRoomCode, isValidCode, normalizeRoomCode } from './e2ee/roomcode'
 import { RELAY_URL } from './config/env'
 import { generateAlias } from './app/ui/namegen'

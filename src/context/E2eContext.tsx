@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { E2eEncryptionService } from '../e2ee/E2eEncryptionService'
+import { E2eEncryptionService } from '../crypto/E2eEncryptionService'
 
 /**
  * E2E encryption lifecycle.
