@@ -17,18 +17,10 @@ const φ = 1.618033988749895
 // ── Types ─────────────────────────────────────────────────────────
 type View = 'lobby' | 'room'
 
-interface Participant {
-  id: string; alias: string; muted: boolean; videoOff: boolean; speaking: boolean
-  /** Inbound frames are actively failing to decrypt (client-side black video). */
-  dropping: boolean
-  /** Remote mix for a peer tile, or the local camera preview for 'self'. */
-  stream: MediaStream | null
-}
-
 import { MicPath, VidePath, SharePath, ChatPath, ExitPath, SlashPath, CopyPath, CheckPath, GearPath, SpeakerPath, EarPath } from './app/ui/icons'
-import { aliasColor } from './app/ui/aliasColor'
 import { useMediaQuery } from './app/ui/useMediaQuery'
 import { Lobby } from './app/screens/Lobby'
+import { Participant, ParticipantTile } from './app/tiles/ParticipantTile'
 
 // ── SecurityLine ──────────────────────────────────────────────────
 function SecurityLine({ progress }: { progress: number }) {
@@ -40,100 +32,6 @@ function SecurityLine({ progress }: { progress: number }) {
         background: progress === 100 ? 'rgba(240,238,233,0.18)' : '#B3241F',
         transition: 'width 0.8s cubic-bezier(0.4,0,0.2,1), background 1.2s ease',
       }} />
-    </div>
-  )
-}
-
-// ── Live video mount ──────────────────────────────────────────────
-function TileVideo({ stream, mirrored, muted }: { stream: MediaStream | null; mirrored?: boolean; muted?: boolean }) {
-  const ref = useRef<HTMLVideoElement | null>(null)
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.srcObject = stream
-    void el.play().catch(() => {})
-    return () => { el.srcObject = null }
-  }, [stream])
-  return (
-    <video ref={ref} autoPlay playsInline muted={muted ?? false}
-      style={{
-        position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
-        transform: mirrored ? 'scaleX(-1)' : undefined, background: '#0a0a0b',
-      }} />
-  )
-}
-
-// Remote video routed through the SpeakerRouter — re-uses the raw stream but
-// lets the router decide between the WebAudio speakerphone path and the native
-// element (earpiece) path, and explicitly starts playback.
-function SpeakerVideo({ router, peer, stream }: { router: SpeakerRouter; peer: string; stream: MediaStream | null }) {
-  const ref = useRef<HTMLVideoElement | null>(null)
-  const sig = stream ? `${stream.getAudioTracks().length}/${stream.getVideoTracks().length}` : 'none'
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    if (stream) router.attach(peer, el, stream)
-    else router.detach(peer)
-  }, [router, peer, sig, stream])
-  useEffect(() => () => router.detach(peer), [router, peer])
-  return (
-    <video ref={ref} autoPlay playsInline
-      style={{
-        position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover',
-        background: '#0a0a0b',
-      }} />
-  )
-}
-
-// ── Participant tile ──────────────────────────────────────────────
-function ParticipantTile({ p, large, router }: { p: Participant; large?: boolean; router?: SpeakerRouter }) {
-  return (
-    <div style={{
-      position: 'relative', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', overflow: 'hidden',
-      background: aliasColor(p.alias),
-      border: p.speaking ? '1px solid rgba(240,238,233,0.28)' : '1px solid rgba(255,255,255,0.08)',
-      borderRadius: '6px',
-      transition: 'border-color 0.3s ease',
-    }}>
-      {p.id === 'self' || !router
-        ? p.stream && <TileVideo stream={p.stream} mirrored={p.id === 'self'} muted={p.id === 'self'} />
-        : <SpeakerVideo router={router} peer={p.id} stream={p.stream} />}
-      {p.dropping && (
-        <div style={{
-          position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none',
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'rgba(10,10,11,0.35)',
-        }}>
-          <span style={{
-            fontFamily: "'Space Mono'", fontSize: 9, letterSpacing: '0.18em',
-            color: 'rgba(240,238,233,0.85)', background: 'rgba(179,36,31,0.75)',
-            padding: '4px 8px', borderRadius: 4, whiteSpace: 'nowrap',
-          }}>DARK — DECRYPTING</span>
-        </div>
-      )}
-      <span style={{
-        fontFamily: "'Space Mono'", color: p.stream ? 'transparent' : 'rgba(240,238,233,0.45)',
-        fontSize: large ? '2.2rem' : '1rem', letterSpacing: '0.06em', zIndex: 1, pointerEvents: 'none',
-      }}>
-        {p.alias.slice(0, 2).toUpperCase()}
-      </span>
-      <div style={{
-        position: 'absolute', bottom: 0, left: 0, right: 0, height: '38px',
-        background: 'linear-gradient(to top, rgba(10,10,11,0.85) 0%, transparent 100%)',
-        display: 'flex', alignItems: 'flex-end', padding: '0 12px 10px',
-        gap: '6px', zIndex: 2,
-      }}>
-        {p.speaking && (
-          <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#F0EEE9', flexShrink: 0, animation: 'breathe 1.4s ease infinite' }} />
-        )}
-        <span style={{ fontFamily: "'Space Mono'", fontSize: '10px', color: 'rgba(240,238,233,0.55)', letterSpacing: '0.07em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {p.alias}
-        </span>
-        {p.muted && (
-          <svg style={{ marginLeft: 'auto', flexShrink: 0 }} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#B3241F" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: MicPath + SlashPath }} />
-        )}
-      </div>
     </div>
   )
 }
