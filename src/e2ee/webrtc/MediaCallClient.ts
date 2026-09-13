@@ -31,7 +31,11 @@
  * is unavailable.
  */
 
-import { E2eEncryptionService } from './E2eEncryptionService'
+import { E2eEncryptionService } from '../E2eEncryptionService'
+import { insertableStreamsSupported } from './caps'
+import { fallbackIceServers } from './ice'
+import { deriveSalt, type EncodedStreamHost, type EncodedStreams, type PeerEntry } from './sframe'
+import { attachReceiverCrypto, attachSenderCrypto, encodedTransformModel, receiverStreamCache, senderStreamCache } from './transforms'
 
 export interface MediaCallEvents {
   /** A peer's remote mix mutated (audio/video track added). */
@@ -45,24 +49,6 @@ export interface MediaCallEvents {
   /** A peer's inbound video/audio is actively failing to decrypt (2s cadence). */
   onFrameDrop?: (peerAlias: string) => void
 }
-
-
-import { fallbackIceServers } from './webrtc/ice'
-export { fallbackIceServers, defaultIceServers } from './webrtc/ice'
-
-
-
-import { insertableStreamsSupported } from './webrtc/caps'
-export { type EncodedCapsProbe, probeEncodedStreamsCaps, insertableStreamsSupported } from './webrtc/caps'
-
-
-
-import { deriveSalt, importMediaKey, makeFrameTransformer, type EncodedFrame, type EncodedStreamHost, type EncodedStreams, type PeerEntry } from './webrtc/sframe'
-export { deriveSalt, importMediaKey, makeFrameTransformer, type EncodedFrame, type EncodedStreamHost, type EncodedStreams, type PeerEntry } from './webrtc/sframe'
-
-import { attachReceiverCrypto, attachSenderCrypto, encodedTransformModel, receiverStreamCache, senderStreamCache } from './webrtc/transforms'
-
-
 
 // ── Signaling payloads (inside the double-ratchet envelope) ───────
 type CallSig =
