@@ -302,6 +302,7 @@ export class MediaCallClient {
       pc, stream, audioSender: null, videoSender: null, shareSender: null,
       salts: new Promise(res => { saltResolve = res }),
       encAttach: new WeakSet(),
+      lastOffer: '',
       iceBuffer: [],
       worker: null,
     }
@@ -442,6 +443,8 @@ export class MediaCallClient {
 
     if (this.svc.amOfferer(peer) && entry.pc.signalingState === 'stable') {
       await entry.pc.setLocalDescription(await entry.pc.createOffer())
+      const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
+      console.log('[debug] sent offer', { peer, mLines: ml, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
       this.svc.sendCallSignal(peer, JSON.stringify({ p: 'offer', d: entry.pc.localDescription!.sdp }))
     }
     // ANSWERER: nothing here — answering happens inside handleSignal('offer').
@@ -483,12 +486,25 @@ export class MediaCallClient {
       // so the salts eventually resolve and the counters stay in sync even
       // when this offer was the very first sight of the peer.
       void this.connectTo(from)
+      const gotML = sig.d.match(/m=/g)?.length ?? 0
+      const fp = `${sig.d.length}:${sig.d.slice(-16)}`
+      // Duplicate-delivery guard: the same offer reaching us twice (stale
+      // relay, reconnect replay) makes the answerer renegotiate the identical
+      // m-lines and DOUBLE every receiver — the tell behind the reproducible
+      // 3→6 receiver jump. Answer the first copy only.
+      if (entry.lastOffer === fp) {
+        console.warn('[media] duplicate offer dropped', { from, mLines: gotML, fp })
+        return
+      }
+      entry.lastOffer = fp
+      console.log('[debug] received offer', { from, mLines: gotML, transceivers: entry.pc.getTransceivers().length, receiversBefore: entry.pc.getReceivers().length })
       if (entry.pc.signalingState !== 'stable') {
         // Duplicate/late offer — deterministic offerer means one offer total.
         return
       }
       try {
         await entry.pc.setRemoteDescription({ type: 'offer', sdp: sig.d })
+        console.log('[debug] answered offer', { from, receiversAfter: entry.pc.getReceivers().length, mLines: entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0 })
         await entry.pc.setLocalDescription(await entry.pc.createAnswer())
         this.svc.sendCallSignal(from, JSON.stringify({ p: 'answer', d: entry.pc.localDescription!.sdp }))
         await this.flushIce(entry)

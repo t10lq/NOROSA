@@ -16,6 +16,10 @@ export type PeerEntry = {
    *  is both safe and required: re-assigning a second transform on the same
    *  tick tears the worker's pipe and throws InvalidStateError. */
   encAttach: WeakSet<RTCRtpSender>
+  /** Fingerprint (sdp length + tail) of the LAST received offer, to drop
+   *  duplicate deliveries that would otherwise renegotiate and duplicate
+   *  m-lines on the answering pc. */
+  lastOffer: string
   iceBuffer: RTCIceCandidateInit[]
   /** ONE worker for every RTCRtpScriptTransform of this peer connection. A
    *  single worker can host many transformers (one per attach). This is what
