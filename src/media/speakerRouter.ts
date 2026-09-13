@@ -17,8 +17,8 @@
 interface PeerGraph {
   el: HTMLVideoElement
   full: MediaStream | null
-  src: MediaStreamAudioSourceNode | null
-  gain: GainNode | null
+  srcs: MediaStreamAudioSourceNode[]
+  gains: GainNode[]
 }
 
 export class SpeakerRouter {
@@ -30,7 +30,7 @@ export class SpeakerRouter {
   attach(peer: string, el: HTMLVideoElement, stream: MediaStream): void {
     const cur = this.byPeer.get(peer)
     if (cur) cur.full = stream
-    else this.byPeer.set(peer, { el, full: stream, src: null, gain: null })
+    else this.byPeer.set(peer, { el, full: stream, srcs: [], gains: [] })
     this.render(peer)
   }
 
@@ -76,28 +76,29 @@ export class SpeakerRouter {
   private render(peer: string): void {
     const g = this.byPeer.get(peer)
     if (!g || !g.el) return
-    const audio = g.full?.getAudioTracks()[0] ?? null
+    // A peer may now carry TWO audio tracks (their mic + their screen-share
+    // system audio). Route EVERY one of them — speakerphone blends them into
+    // the destination, the element path blends them natively.
+    const audio = g.full?.getAudioTracks() ?? []
     const video = g.full?.getVideoTracks()[0] ?? null
     this.teardownGraph(g)
-    g.src = null
-    g.gain = null
 
-    if (this.speakerOn && this.ctx && audio) {
+    if (this.speakerOn && this.ctx && audio.length > 0) {
       const ctx = this.ctx
       try {
-        const src = ctx.createMediaStreamSource(new MediaStream([audio]))
-        const gain = ctx.createGain()
-        gain.gain.value = 1
-        src.connect(gain)
-        gain.connect(ctx.destination)
-        g.src = src
-        g.gain = gain
+        for (const a of audio) {
+          const src = ctx.createMediaStreamSource(new MediaStream([a]))
+          const gain = ctx.createGain()
+          gain.gain.value = 1
+          src.connect(gain)
+          gain.connect(ctx.destination)
+          g.srcs.push(src)
+          g.gains.push(gain)
+        }
         g.el.srcObject = video ? new MediaStream([video]) : null
       } catch (err) {
         console.warn('[speaker] WebAudio route failed, falling back to element playback:', err)
         this.teardownGraph(g)
-        g.src = null
-        g.gain = null
         g.el.srcObject = g.full
       }
     } else {
@@ -121,10 +122,14 @@ export class SpeakerRouter {
   }
 
   private teardownGraph(g: PeerGraph): void {
-    try { if (g.gain) g.gain.disconnect() } catch { /* node already dead */ }
-    try { if (g.src) g.src.disconnect() } catch { /* node already dead */ }
-    g.src = null
-    g.gain = null
+    for (const gain of g.gains) {
+      try { gain.disconnect() } catch { /* node already dead */ }
+    }
+    for (const src of g.srcs) {
+      try { src.disconnect() } catch { /* node already dead */ }
+    }
+    g.srcs = []
+    g.gains = []
   }
 
   private maybeShutdownCtx(): void {

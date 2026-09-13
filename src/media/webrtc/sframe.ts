@@ -3,10 +3,16 @@ export type PeerEntry = {
   stream: MediaStream
   audioSender: RTCRtpSender | null
   videoSender: RTCRtpSender | null
+  /** Second audio transceiver dedicated to screen-share system audio. It is
+   *  negotiated (track null) from the start like the mic line, so starting a
+   *  share is a plain replaceTrack — no renegotiation. */
+  shareSender: RTCRtpSender | null
   /** Resolves with the media key + per-direction SFrame salts once the key
    *  lands. Crypto attachment must AWAIT this — never attach with a zero key. */
   salts: Promise<{ key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }>
-  encAttach: { audio: boolean; video: boolean }
+  /** Encrypt transform attached per SENDER (mic, camera/share, share-audio) —
+   *  a sender gets its transform exactly once for its whole lifetime. */
+  encAttach: WeakSet<RTCRtpSender>
   iceBuffer: RTCIceCandidateInit[]
   /** ONE worker for every RTCRtpScriptTransform of this peer connection. A
    *  single worker can host many transformers (one per attach). This is what
