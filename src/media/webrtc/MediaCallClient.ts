@@ -31,6 +31,7 @@
  */
 
 import { E2eEncryptionService } from '../../crypto/E2eEncryptionService'
+import { dbg, debugEnabled } from '../../debug'
 import { insertableStreamsSupported } from './caps'
 import { fallbackIceServers } from './ice'
 import { deriveSalt, type EncodedStreamHost, type EncodedStreams, type PeerEntry } from './sframe'
@@ -236,18 +237,18 @@ this.closePeer(alias, 'presence-offline')
     // Entrance counter — BEFORE any guard. Two hits for one peer = the dial
     // layer fired twice (case-2 tell) even though the guard still reuses the
     // same pc below.
-    console.count(`[debug] ensurePeer enter ${peer}`)
+    dbg('ensurePeer enter', peer)
     if (this.disposed || peer === this.svc.selfAlias) return null
     const existing = this.peers.get(peer)
     if (existing) {
       // Tell for re-dials: if the SAME alias runs ensurePeer twice, reuse here
       // proves no second pc / no extra transceivers ever happen.
-      console.log('[debug] ensurePeer reuse', { peer })
+      dbg('ensurePeer reuse', { peer })
       return existing
     }
     // hadEntryBefore=false 4× for one alias = something wiped the entry between
     // calls (closePeer) — the recreation loop, not a guard failure.
-    console.log('[debug] ensurePeer create', { peer, hadEntryBefore: !!existing })
+    dbg('ensurePeer create', { peer, hadEntryBefore: !!existing })
     if (!insertableStreamsSupported()) return null
 
     const pc = new RTCPeerConnection({ iceServers: this.iceServers })
@@ -271,7 +272,7 @@ this.closePeer(alias, 'presence-offline')
     // Sanity: exactly one transceiver leaves here. A larger count means a
     // stray addTransceiver or a duplicated ensurePeer — the tell for mystery
     // receiver accumulation on the far side.
-    console.log('[debug] peer pc created', { peer, transceivers: pc.getTransceivers().length })
+    dbg('peer pc created', { peer, transceivers: pc.getTransceivers().length })
 
     // LEGACY model: encoded streams MUST exist synchronously at negotiation;
     // Chromium throws "Too late to create encoded streams" once RTP is flowing.
@@ -373,7 +374,7 @@ this.closePeer(alias, 'presence-offline')
       8,
       700,
     )
-    console.log('[media] media key ready for', peer)
+    dbg('media key ready for', peer)
     const send = await deriveSalt(key, peer) // encrypt our sends TO this peer
     const recv = await deriveSalt(key, this.svc.selfAlias ?? '') // decrypt THEIR sends
 
@@ -395,7 +396,7 @@ this.closePeer(alias, 'presence-offline')
         await entry.pc.setLocalDescription(await entry.pc.createOffer())
         const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
         const skel = entry.pc.localDescription?.sdp.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
-        console.log('[debug] sent offer', { peer, mLines: ml, mids: skel, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
+        dbg('sent offer', { peer, mLines: ml, mids: skel, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
         this.svc.sendCallSignal(peer, JSON.stringify({ p: 'offer', d: entry.pc.localDescription!.sdp }))
         // Offer is out — future renegotiation is the caller's business now.
         entry.offerInFlight = false
@@ -444,7 +445,7 @@ this.closePeer(alias, 'presence-offline')
       const fp = `${sig.d.length}:${sig.d.slice(-16)}`
       // Workaround: filter lines that are SDP headers / mid attribs.
       const skeleton = sig.d.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
-      console.log('[debug] received offer', { from, mLines: gotML, mids: skeleton, transceivers: entry.pc.getTransceivers().length, receiversBefore: entry.pc.getReceivers().length })
+      dbg('received offer', { from, mLines: gotML, mids: skeleton, transceivers: entry.pc.getTransceivers().length, receiversBefore: entry.pc.getReceivers().length })
       // Duplicate-delivery guard: the same offer reaching us twice (stale
       // relay, reconnect replay) makes the answerer renegotiate the identical
       // m-lines and DOUBLE every receiver — the tell behind the reproducible
@@ -460,7 +461,7 @@ this.closePeer(alias, 'presence-offline')
       }
       try {
         await entry.pc.setRemoteDescription({ type: 'offer', sdp: sig.d })
-        console.log('[debug] answered offer', { from, receiversAfter: entry.pc.getReceivers().length, mLines: entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0 })
+        dbg('answered offer', { from, receiversAfter: entry.pc.getReceivers().length, mLines: entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0 })
         await entry.pc.setLocalDescription(await entry.pc.createAnswer())
         this.svc.sendCallSignal(from, JSON.stringify({ p: 'answer', d: entry.pc.localDescription!.sdp }))
         await this.flushIce(entry)
@@ -523,7 +524,7 @@ this.closePeer(alias, 'presence-offline')
   }
 
   private async attachReceiverWhenReady(peer: string, entry: PeerEntry, receiver: RTCRtpReceiver): Promise<void> {
-    console.log('[debug] attachReceiver', { peer, receiverId: receiver.track?.id, pcReceivers: entry.pc.getReceivers().length, alreadyAttached: this.attachedReceivers.has(receiver), pc: entry.pc.connectionState })
+    dbg('attachReceiver', { peer, receiverId: receiver.track?.id, pcReceivers: entry.pc.getReceivers().length, alreadyAttached: this.attachedReceivers.has(receiver), pc: entry.pc.connectionState })
     if (this.attachedReceivers.has(receiver)) return
     if (entry.pc.connectionState !== 'connected') return
     if (!receiver.track || receiver.track.readyState === 'ended') return
@@ -567,7 +568,7 @@ this.closePeer(alias, 'presence-offline')
             staleRemoved++
           }
         }
-        console.log('[debug] addTrack', { peer, trackId: receiver.track.id, trackKind: receiver.track.kind, beforeCount: entry.stream.getTracks().length + staleRemoved, isNew: !entry.stream.getTracks().includes(receiver.track), staleRemoved })
+        dbg('addTrack', { peer, trackId: receiver.track.id, trackKind: receiver.track.kind, beforeCount: entry.stream.getTracks().length + staleRemoved, isNew: !entry.stream.getTracks().includes(receiver.track), staleRemoved })
         if (!entry.stream.getTracks().includes(receiver.track)) {
           entry.stream.addTrack(receiver.track)
           added = true
@@ -575,10 +576,13 @@ this.closePeer(alias, 'presence-offline')
         // Who mutes a received track tells us whether the far side swapped its
         // sender (share/camera/replaceTrack): a mute on the video track right
         // when the sharer started = normal swap; a persistent mute with no
-        // unmute = black-at-the-source (the tile never re-fetches).
-        const t = receiver.track
-        for (const ev of ['mute', 'unmute', 'ended'] as const) {
-          t.addEventListener(ev, () => console.log(`[debug] rxTrack ${ev}`, { peer, kind: t.kind, id: t.id }))
+        // unmute = black-at-the-source (the tile never re-fetches). Diagnostic
+        // listeners only — skipped in production builds.
+        if (debugEnabled) {
+          const t = receiver.track
+          for (const ev of ['mute', 'unmute', 'ended'] as const) {
+            t.addEventListener(ev, () => dbg(`rxTrack ${ev}`, { peer, kind: t.kind, id: t.id }))
+          }
         }
       }
       if (streams) {
@@ -586,9 +590,9 @@ this.closePeer(alias, 'presence-offline')
       } else {
         attachReceiverCrypto(receiver, null as unknown as EncodedStreams, entry, salts.key, salts.recv, () => this.noteFrameDrop(peer))
       }
-      console.log(`[media] decrypt attached — ${peer}`)
+      dbg('decrypt attached', { peer })
       if (added) this.events.onStream?.(peer, entry.stream)
-      console.log('[debug] receiver attached', { peer, tracks: entry.stream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, readyState: t.readyState, id: t.id })) })
+      dbg('receiver attached', { peer, tracks: entry.stream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, readyState: t.readyState, id: t.id })) })
     } catch (err) {
       console.warn(`[media] decrypt attach deferred for ${peer}:`, err instanceof Error ? err.message : err)
     }
@@ -633,7 +637,7 @@ this.closePeer(alias, 'presence-offline')
     // the exact track they just replaceTrack()'d in instead.
     const t = track ?? sender.track
     const alreadyBool = this.disposed || !entry || entry.encAttach.has(sender)
-    console.log('[debug] attachSend called', { peer, kind, hasTrack: !!t, already: alreadyBool })
+    dbg('attachSend called', { peer, kind, hasTrack: !!t, already: alreadyBool })
     // One encrypt transform per sender for life — modern engines keep
     // `sender.transform` across replaceTrack, so a re-assign mid-life would
     // tear the worker pipe (InvalidStateError) and kill the video instead of
@@ -716,7 +720,7 @@ this.closePeer(alias, 'presence-offline')
     const entry = this.peers.get(peer)
     // Who closes a pair determines whether the recreation loop (offer×N for one
     // alias) is a heal, a prune, or a transient failure — log it every time.
-    console.log('[debug] closePeer', { peer, reason, hadEntry: !!entry, pcState: entry?.pc.connectionState })
+    dbg('closePeer', { peer, reason, hadEntry: !!entry, pcState: entry?.pc.connectionState })
     if (!entry) return
     // Audit scope 5: a local teardown must be SIGNALED to the far side over
     // the encrypted channel, or it keeps a half-open pair with stale media

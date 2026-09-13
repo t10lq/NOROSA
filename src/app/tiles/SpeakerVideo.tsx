@@ -1,4 +1,5 @@
 import { useRef, useEffect } from 'react'
+import { dbg } from '../../debug'
 import type { SpeakerRouter } from '../../media/speakerRouter'
 
 // Remote video routed through the SpeakerRouter — re-uses the raw stream but
@@ -11,7 +12,7 @@ export function SpeakerVideo({ router, peer, stream }: { router: SpeakerRouter; 
     const el = ref.current
     if (!el) return
     if (stream) {
-      console.log('[debug] SpeakerVideo attach', { peer, sig, videoLive: stream.getVideoTracks().filter(t => t.readyState === 'live').length })
+      dbg('SpeakerVideo attach', { peer, sig, videoLive: stream.getVideoTracks().filter(t => t.readyState === 'live').length })
       router.attach(peer, el, stream)
     } else {
       router.detach(peer)
@@ -26,8 +27,8 @@ export function SpeakerVideo({ router, peer, stream }: { router: SpeakerRouter; 
     if (!el || !stream) return
     const v = [...stream.getVideoTracks()].filter(t => t.readyState === 'live').pop() ?? null
     if (!v) return
-    const onMute = () => { console.log('[debug] SpeakerVideo videoMute', { peer, id: v.id }); if (ref.current) ref.current.srcObject = null }
-    const onUnmute = () => { console.log('[debug] SpeakerVideo videoUnmute', { peer, id: v.id }); if (ref.current) router.attach(peer, ref.current as HTMLVideoElement, stream) }
+    const onMute = () => { dbg('SpeakerVideo videoMute', { peer, id: v.id }); if (ref.current) ref.current.srcObject = null }
+    const onUnmute = () => { dbg('SpeakerVideo videoUnmute', { peer, id: v.id }); if (ref.current) router.attach(peer, ref.current as HTMLVideoElement, stream) }
     v.addEventListener('mute', onMute)
     v.addEventListener('unmute', onUnmute)
     return () => {

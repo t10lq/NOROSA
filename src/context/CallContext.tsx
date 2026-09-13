@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useE2e } from './E2eContext'
+import { dbg } from '../debug'
 import { MediaCallClient, defaultIceServers, probeEncodedStreamsCaps, type EncodedCapsProbe, type MediaCallEvents } from '../media/webrtc'
 
 /**
@@ -71,7 +72,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
     // constructed transform has no readable/writable (stubbed pipeline), so
     // E2EE media can never attach there. Log the truth instead of guessing.
     const probe = probeEncodedStreamsCaps()
-    console.log('[media] capability probe →', JSON.stringify(probe))
+    dbg('media capability probe →', JSON.stringify(probe))
     setSupportProbe(probe)
 
     const events: MediaCallEvents = {

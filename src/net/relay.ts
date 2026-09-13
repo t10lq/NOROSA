@@ -1,4 +1,5 @@
 import type { OneTimePrekey, PublicKeyBundle, WireCall, WireIn, WireKeysResult, WireMsg, WireOut, WireUpload } from '../crypto/types'
+import { dbg } from '../debug'
 
 /**
  * RelayLink — WebSocket transport to the NOROSA blind gate.
@@ -122,7 +123,7 @@ export class RelayLink {
         // a fresh UUID per sendCall(). Same id here twice ⇒ the relay/mailbox
         // delivered one wire twice (transport bug). Two DIFFERENT ids ⇒ the
         // offerer really sent two wires (client bug further up).
-        console.log('[debug] wire.call rx', { id: wire.id, from: wire.from, len: wire.payload.length })
+        dbg('wire.call rx', { id: wire.id, from: wire.from, len: wire.payload.length })
         this.onCallIncoming(wire.from, wire.payload)
         break
       }

@@ -14,6 +14,8 @@
  * explicitly started) and applies setSinkId for a user-selected output device.
  */
 
+import { dbg } from '../debug'
+
 interface PeerGraph {
   el: HTMLVideoElement
   full: MediaStream | null
@@ -81,7 +83,7 @@ export class SpeakerRouter {
     // the destination, the element path blends them natively.
     const audio = g.full?.getAudioTracks() ?? []
     const video = [...(g.full?.getVideoTracks() ?? [])].filter(t => t.readyState === 'live').pop() ?? null
-    console.log('[debug] speakerRouter.render', { peer, hasAudioTrack: audio.length > 0, hasVideoTrack: !!video })
+    dbg('speakerRouter.render', { peer, hasAudioTrack: audio.length > 0, hasVideoTrack: !!video })
     this.teardownGraph(g)
 
     if (this.speakerOn && this.ctx && audio.length > 0) {
