@@ -301,7 +301,13 @@ this.closePeer(alias, 'presence-offline')
       this.events.onPeerState?.(peer, pc.connectionState)
       if (pc.connectionState === 'connected') {
         entry.offerInFlight = false
-        if (entry.audioSender?.track) void this.attachSend(peer, entry.audioSender, 'audio', entry.audioSender.track)
+        // Never read `sender.track` to pick the attach track — current
+        // Chromium keeps it transiently null right after a replaceTrack
+        // (documented ground truth). The mic track we injected (prepareMedia
+        // at connect, setMicOn on toggle) is authoritative, and when the mic
+        // was denied here the sender simply stays trackless until a toggle.
+        const t = this.audioEnabled && this.micTrack?.readyState === 'live' ? this.micTrack : null
+        if (t && entry.audioSender) void this.attachSend(peer, entry.audioSender, 'audio', t)
         // Belt-and-suspenders decrypt: some browsers never fire ontrack for a
         // sendrecv m-line whose remote sender had no track at negotiation. An
         // audio sender starts muted (mic granted later) and the decrypted
@@ -448,7 +454,6 @@ this.closePeer(alias, 'presence-offline')
         return
       }
       entry.lastOffer = fp
-      console.log('[debug] received offer', { from, mLines: gotML, transceivers: entry.pc.getTransceivers().length, receiversBefore: entry.pc.getReceivers().length })
       if (entry.pc.signalingState !== 'stable') {
         // Duplicate/late offer — deterministic offerer means one offer total.
         return
@@ -659,9 +664,13 @@ this.closePeer(alias, 'presence-offline')
 
   /** Unmute/mute. replaceTrack — no renegotiation, the call stays up. */
   async setMicOn(on: boolean, deviceId?: string): Promise<void> {
-    this.audioEnabled = on
+    // Resolve the track BEFORE flipping client state: a denied/absent mic
+    // must reject so the caller's revert keeps UI and client state in sync
+    // (audioEnabled would otherwise claim "on" while the UI correctly shows
+    // blocked, and the stale `on` would leak into the next mute broadcast).
     if (on && deviceId) await this.ensureMic(deviceId)
     const track = on ? (this.micTrack ?? await this.ensureMic(this.micDeviceId)) : null
+    this.audioEnabled = on
     for (const [peer, entry] of this.peers) {
       if (!entry.audioSender) continue
       entry.audioSender.replaceTrack(track)
