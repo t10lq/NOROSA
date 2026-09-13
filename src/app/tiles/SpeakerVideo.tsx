@@ -10,8 +10,10 @@ export function SpeakerVideo({ router, peer, stream }: { router: SpeakerRouter; 
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    if (stream) router.attach(peer, el, stream)
-    else {
+    if (stream) {
+      console.log('[debug] SpeakerVideo attach', { peer, sig, videoLive: stream.getVideoTracks().filter(t => t.readyState === 'live').length })
+      router.attach(peer, el, stream)
+    } else {
       router.detach(peer)
       el.srcObject = null
     }
@@ -24,8 +26,8 @@ export function SpeakerVideo({ router, peer, stream }: { router: SpeakerRouter; 
     if (!el || !stream) return
     const v = [...stream.getVideoTracks()].filter(t => t.readyState === 'live').pop() ?? null
     if (!v) return
-    const onMute = () => { if (ref.current) ref.current.srcObject = null }
-    const onUnmute = () => { if (ref.current) router.attach(peer, ref.current as HTMLVideoElement, stream) }
+    const onMute = () => { console.log('[debug] SpeakerVideo videoMute', { peer, id: v.id }); if (ref.current) ref.current.srcObject = null }
+    const onUnmute = () => { console.log('[debug] SpeakerVideo videoUnmute', { peer, id: v.id }); if (ref.current) router.attach(peer, ref.current as HTMLVideoElement, stream) }
     v.addEventListener('mute', onMute)
     v.addEventListener('unmute', onUnmute)
     return () => {

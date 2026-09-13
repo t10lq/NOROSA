@@ -630,6 +630,14 @@ this.closePeer(alias, 'presence-offline')
           entry.stream.addTrack(receiver.track)
           added = true
         }
+        // Who mutes a received track tells us whether the far side swapped its
+        // sender (share/camera/replaceTrack): a mute on the video track right
+        // when the sharer started = normal swap; a persistent mute with no
+        // unmute = black-at-the-source (the tile never re-fetches).
+        const t = receiver.track
+        for (const ev of ['mute', 'unmute', 'ended'] as const) {
+          t.addEventListener(ev, () => console.log(`[debug] rxTrack ${ev}`, { peer, kind: t.kind, id: t.id }))
+        }
       }
       if (streams) {
         attachReceiverCrypto(receiver, streams, entry, salts.key, salts.recv, () => this.noteFrameDrop(peer))
