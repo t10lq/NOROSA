@@ -6,6 +6,10 @@ export function TileVideo({ stream, mirrored, muted }: { stream: MediaStream | n
   useEffect(() => {
     const el = ref.current
     if (!el) return
+    if (!stream) {
+      el.srcObject = null
+      return
+    }
     el.srcObject = stream
     void el.play().catch(() => {})
     return () => { el.srcObject = null }

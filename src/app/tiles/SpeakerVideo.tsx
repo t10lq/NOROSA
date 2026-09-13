@@ -11,9 +11,32 @@ export function SpeakerVideo({ router, peer, stream }: { router: SpeakerRouter; 
     const el = ref.current
     if (!el) return
     if (stream) router.attach(peer, el, stream)
-    else router.detach(peer)
+    else {
+      router.detach(peer)
+      el.srcObject = null
+    }
   }, [router, peer, sig, stream])
-  useEffect(() => () => router.detach(peer), [router, peer])
+  // A remote camera going off mid-call freezes the element on its last frame.
+  // Receiver tracks fire 'mute' when the sender stops sending — drop the old
+  // picture; the next 'unmute' re-attaches through the router.
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !stream) return
+    const v = stream.getVideoTracks()[0]
+    if (!v) return
+    const onMute = () => { if (ref.current) ref.current.srcObject = null }
+    const onUnmute = () => { if (ref.current) router.attach(peer, ref.current as HTMLVideoElement, stream) }
+    v.addEventListener('mute', onMute)
+    v.addEventListener('unmute', onUnmute)
+    return () => {
+      v.removeEventListener('mute', onMute)
+      v.removeEventListener('unmute', onUnmute)
+    }
+  }, [router, peer, sig, stream])
+  useEffect(() => () => {
+    router.detach(peer)
+    if (ref.current) ref.current.srcObject = null
+  }, [router, peer])
   return (
     <video ref={ref} autoPlay playsInline
       style={{
