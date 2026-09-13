@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" role="img" aria-label="Norosa">
+  <rect width="200" height="200" rx="44" fill="#0A0A0B" />
+
+  <ellipse cx="100" cy="170" rx="56" ry="6" fill="rgba(0,0,0,0.42)" />
+
+  <polygon points="151.9,77.8 150.1,88.0 186.7,89.1" fill="#F0EEE9" opacity="0.23" />
+  <polygon points="151.2,83.2 148.3,93.2 184.6,98.2" fill="#F0EEE9" opacity="0.28" />
+  <polygon points="149.9,88.6 146.0,98.2 181.6,107.0" fill="#F0EEE9" opacity="0.33" />
+  <polygon points="148.1,93.7 143.2,102.9 177.7,115.4" fill="#F0EEE9" opacity="0.37" />
+  <polygon points="145.8,98.7 139.9,107.3 172.9,123.3" fill="#F0EEE9" opacity="0.42" />
+  <polygon points="142.9,103.4 136.2,111.3 167.3,130.7" fill="#F0EEE9" opacity="0.46" />
+  <polygon points="139.6,107.7 132.1,114.9 160.9,137.5" fill="#F0EEE9" opacity="0.51" />
+  <polygon points="135.8,111.7 127.6,118.1 153.9,143.6" fill="#F0EEE9" opacity="0.55" />
+  <polygon points="131.6,115.3 122.8,120.7 146.3,148.9" fill="#F0EEE9" opacity="0.6" />
+  <polygon points="127.1,118.4 117.7,122.9 138.1,153.3" fill="#F0EEE9" opacity="0.65" />
+  <polygon points="122.3,121.0 112.5,124.5 129.5,156.9" fill="#F0EEE9" opacity="0.69" />
+  <polygon points="117.2,123.1 107.1,125.5 120.7,159.5" fill="#F0EEE9" opacity="0.74" />
+  <polygon points="111.9,124.6 101.6,126.0 111.5,161.2" fill="#F0EEE9" opacity="0.78" />
+  <polygon points="106.5,125.6 96.1,125.9 102.3,162.0" fill="#F0EEE9" opacity="0.83" />
+  <polygon points="101.1,126.0 90.7,125.2 93.0,161.7" fill="#F0EEE9" opacity="0.81" />
+  <polygon points="95.6,125.8 85.4,123.9 83.8,160.5" fill="#F0EEE9" opacity="0.76" />
+  <polygon points="90.1,125.1 80.2,122.1 74.8,158.3" fill="#F0EEE9" opacity="0.71" />
+  <polygon points="84.8,123.7 75.2,119.7 66.0,155.2" fill="#F0EEE9" opacity="0.67" />
+  <polygon points="79.7,121.9 70.6,116.9 57.7,151.1" fill="#F0EEE9" opacity="0.62" />
+  <polygon points="74.7,119.4 66.2,113.5 49.8,146.3" fill="#F0EEE9" opacity="0.58" />
+  <polygon points="70.1,116.5 62.2,109.7 42.4,140.6" fill="#F0EEE9" opacity="0.53" />
+  <polygon points="65.8,113.1 58.7,105.6 35.7,134.1" fill="#F0EEE9" opacity="0.49" />
+  <polygon points="61.8,109.3 55.6,101.0 29.8,127.0" fill="#F0EEE9" opacity="0.44" />
+  <polygon points="58.3,105.1 53.0,96.2 24.6,119.3" fill="#F0EEE9" opacity="0.39" />
+  <polygon points="55.3,100.5 50.9,91.1 20.2,111.1" fill="#F0EEE9" opacity="0.35" />
+  <polygon points="52.7,95.7 49.4,85.8 16.7,102.5" fill="#F0EEE9" opacity="0.3" />
+
+  <ellipse cx="70" cy="88" rx="5" ry="8" fill="#121216" transform="rotate(-16 70 88)" />
+  <ellipse cx="130" cy="88" rx="5" ry="8" fill="#121216" transform="rotate(16 130 88)" />
+
+  <path d="M31,116 Q31,86 52,74 Q74,62 100,62 Q126,62 148,74 Q169,86 169,116 Q169,147 146,157 Q122,166 100,166 Q78,166 54,157 Q31,147 31,116 Z" fill="#18181B" stroke="rgba(240,238,233,0.07)" />
+
+  <ellipse cx="100" cy="130" rx="34" ry="22" fill="#111113" />
+
+  <circle cx="77" cy="131" r="3" fill="rgba(240,238,233,0.07)" />
+  <circle cx="123" cy="131" r="3" fill="rgba(240,238,233,0.07)" />
+
+  <ellipse cx="84" cy="121" rx="4.2" ry="4.8" fill="rgba(240,238,233,0.45)" />
+  <ellipse cx="116" cy="121" rx="4.2" ry="4.8" fill="rgba(240,238,233,0.45)" />
+  <circle cx="83.4" cy="121.6" r="1.5" fill="#0A0A0B" />
+  <circle cx="115.4" cy="121.6" r="1.5" fill="#0A0A0B" />
+
+  <ellipse cx="100" cy="136" rx="6" ry="4.5" fill="rgba(240,238,233,0.45)" />
+
+  <path d="M100,140.5 v4.5" stroke="rgba(240,238,233,0.45)" stroke-width="1.6" stroke-linecap="round" />
+  <path d="M97,145 Q100,147.5 103,145" stroke="rgba(240,238,233,0.35)" stroke-width="1.6" stroke-linecap="round" fill="none" />
+
+  <ellipse cx="80" cy="161" rx="8" ry="5" fill="#0D0D0F" />
+  <ellipse cx="120" cy="161" rx="8" ry="5" fill="#0D0D0F" />
+</svg>

@@ -1,5 +1,9 @@
 {
-  "description": "Experience secure, anonymous meetings in a visually stunning environment where privacy is paramount, ensuring no data is stored after sessions end.",
+  "title": "Norosa — Encrypted Calls",
+  "description": "End-to-end encrypted calls and chat. The server only knocks. It never listens.",
+  "icons": {
+    "icon": "/favicon.svg"
+  },
   "robots": {
     "index": false
   },
