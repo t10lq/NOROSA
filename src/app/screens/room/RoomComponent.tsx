@@ -33,6 +33,27 @@ export function RoomComponent({ userId, onClose }: { userId: string; onClose?: (
   const [sendErr, setSendErr] = useState<string | null>(null)
   const [, force] = useReducer(x => x + 1, 0)
   const listRef = useRef<HTMLDivElement | null>(null)
+  // Sticky-bottom chat scroll: while the reader is pinned to the newest message
+  // the list follows new arrivals; scrolling up into history stops the takeover
+  // and instead raises the "جديد ↓" affordance.
+  const stickyRef = useRef(true)
+  const [unread, setUnread] = useState(false)
+
+  const jumpToLatest = () => {
+    const el = listRef.current
+    if (!el) return
+    el.scrollTop = el.scrollHeight
+    stickyRef.current = true
+    setUnread(false)
+  }
+
+  const onListScroll = () => {
+    const el = listRef.current
+    if (!el) return
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50
+    stickyRef.current = nearBottom
+    if (nearBottom) setUnread(false)
+  }
 
   const messages = getChatMessages()
   const groupId = getChatGroup()
@@ -45,15 +66,19 @@ export function RoomComponent({ userId, onClose }: { userId: string; onClose?: (
   const anyChanged = safetyRows.some(x => x.status.changed)
 
   useEffect(() => subscribeRoomChat(force), [])
-  // Bottom-anchored like a typical chat app: on first open and whenever a new
-  // message lands, stick to the newest message — unless the reader is already
-  // scrolling through history.
+  // Bottom-anchored like a typical chat app: we only follow new arrivals while
+  // the reader is already pinned to the bottom (within 50px). A history reader
+  // keeps their place and gets the "جديد ↓" affordance instead.
   useEffect(() => {
     const el = listRef.current
     if (!el) return
-    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48
-    if (nearBottom) el.scrollTop = el.scrollHeight
-  }, [messages])
+    if (stickyRef.current) {
+      el.scrollTop = el.scrollHeight
+      setUnread(false)
+    } else {
+      setUnread(true)
+    }
+  }, [messages.length])
 
   const send = async () => {
     const text = draft.trim()
@@ -137,28 +162,38 @@ export function RoomComponent({ userId, onClose }: { userId: string; onClose?: (
           bubbles sits directly above the composer and older messages push up as
           new ones land (the margin-top:auto spacer collapses once the list
           overflows and normal scrolling takes over). */}
-      <div ref={listRef} style={{ flex: 1, overflowY: 'auto', padding: '12px 0', display: 'flex', flexDirection: 'column' }}>
-        <div style={{ marginTop: 'auto' }} />
-        {messages.length === 0
-          ? (
-            <p style={{ padding: '34px 20px', textAlign: 'center', color: '#3A3A3F', fontSize: 13, fontWeight: 400, lineHeight: 1.6 }}>
-              {peerNote ?? `Delivered as ciphertext.${'\n'}Even the server cannot read it.`}
-            </p>
-          )
-          : messages.map(m => (
-            <div key={m.id} style={{ padding: '7px 20px' }}>
-              <div style={{ display: 'flex', gap: 7, alignItems: 'baseline', marginBottom: 3 }}>
-                <span style={{ fontFamily: "'Space Mono'", fontSize: 10, color: m.alias === selfAlias ? 'rgba(240,238,233,0.5)' : '#3A3A3F', letterSpacing: '0.06em' }}>
-                  {m.alias === selfAlias ? 'you' : m.alias}
-                </span>
-                <span style={{ fontSize: 10, color: '#2A2A2F' }}>
-                  {new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                </span>
+      <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+        <div ref={listRef} onScroll={onListScroll} style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '12px 0', display: 'flex', flexDirection: 'column' }}>
+          <div style={{ marginTop: 'auto' }} />
+          {messages.length === 0
+            ? (
+              <p style={{ padding: '34px 20px', textAlign: 'center', color: '#3A3A3F', fontSize: 13, fontWeight: 400, lineHeight: 1.6 }}>
+                {peerNote ?? `Delivered as ciphertext.${'\n'}Even the server cannot read it.`}
+              </p>
+            )
+            : messages.map(m => (
+              <div key={m.id} style={{ padding: '7px 20px' }}>
+                <div style={{ display: 'flex', gap: 7, alignItems: 'baseline', marginBottom: 3 }}>
+                  <span style={{ fontFamily: "'Space Mono'", fontSize: 10, color: m.alias === selfAlias ? 'rgba(240,238,233,0.5)' : '#3A3A3F', letterSpacing: '0.06em' }}>
+                    {m.alias === selfAlias ? 'you' : m.alias}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#2A2A2F' }}>
+                    {new Date(m.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontSize: 14, color: '#F0EEE9', lineHeight: 1.55, fontWeight: 400 }}>{m.text}</p>
               </div>
-              <p style={{ margin: 0, fontSize: 14, color: '#F0EEE9', lineHeight: 1.55, fontWeight: 400 }}>{m.text}</p>
-            </div>
-          ))
-        }
+            ))
+          }
+        </div>
+        {unread && (
+          <button onClick={jumpToLatest} className="tap" style={{
+            position: 'absolute', bottom: 12, left: '50%', transform: 'translateX(-50%)',
+            background: 'rgba(240,238,233,0.94)', border: 'none', borderRadius: 999,
+            padding: '8px 16px', cursor: 'pointer', boxShadow: '0 6px 18px rgba(0,0,0,0.45)',
+            fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.08em', color: '#0A0A0B',
+          }}>جديد ↓</button>
+        )}
       </div>
 
       {/* Composer */}
