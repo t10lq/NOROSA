@@ -301,7 +301,7 @@ export class MediaCallClient {
     const entry: PeerEntry = {
       pc, stream, audioSender: null, videoSender: null, shareSender: null,
       salts: new Promise(res => { saltResolve = res }),
-      encAttach: new WeakSet(),
+      encAttach: new Map(),
       iceBuffer: [],
       worker: null,
     }
@@ -637,11 +637,22 @@ export class MediaCallClient {
     // left the peer with undecryptable frames (permanent black). Callers pass
     // the exact track they just replaceTrack()'d in instead.
     const t = track ?? sender.track
-    console.log('[debug] attachSend called', { peer, kind, hasTrack: !!t, already: this.disposed || !entry || entry.encAttach.has(sender) })
-    if (!entry || entry.encAttach.has(sender) || !t) return
+    const attachedId = entry?.encAttach.get(sender)
+    const alreadyText = this.disposed || !entry
+      ? 'dead'
+      : attachedId === t?.id
+        ? 'same-track'
+        : 'new-track'
+    console.log('[debug] attachSend called', { peer, kind, hasTrack: !!t, already: alreadyText })
+    if (!entry || !t) return
+    // Re-encrypt whenever the sender's track CHANGES (camera/share toggles).
+    // Legacy model pipes frames through a track-agnostic encoded stream, so a
+    // second pipe there would double-encrypt — once-only remains correct.
+    if (attachedId === t.id) return
+    if (encodedTransformModel() === 'legacy' && attachedId !== undefined) return
     const failKey = `${peer}:${kind}`
     void entry.salts.then(async salts => {
-      if (this.disposed || !this.peers.get(peer) || entry.encAttach.has(sender)) return
+      if (this.disposed || !this.peers.get(peer) || entry.encAttach.get(sender) === t.id) return
       const ok = await attachSenderCrypto(sender, entry, salts.key, salts.send)
       if (!ok) {
         // createEncodedStreams is one-shot and now cached, so a retry can only
@@ -658,7 +669,7 @@ export class MediaCallClient {
         return
       }
       this.encryptFails.delete(failKey)
-      entry.encAttach.add(sender)
+      entry.encAttach.set(sender, t.id)
     }).catch(() => {})
   }
 

@@ -10,9 +10,12 @@ export type PeerEntry = {
   /** Resolves with the media key + per-direction SFrame salts once the key
    *  lands. Crypto attachment must AWAIT this — never attach with a zero key. */
   salts: Promise<{ key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }>
-  /** Encrypt transform attached per SENDER (mic, camera/share, share-audio) —
-   *  a sender gets its transform exactly once for its whole lifetime. */
-  encAttach: WeakSet<RTCRtpSender>
+  /** Encrypt transform attached per SENDER, keyed by the id of the track it
+   *  sealed. A track change (camera off→on, screen share start/stop) must
+   *  RE-attach the transform — the spec lets browsers drop the sender
+   *  transform on replaceTrack(), and "already encrypted forever" would leave
+   *  the new track plaintext → remote decrypt fails → permanent black. */
+  encAttach: Map<RTCRtpSender, string>
   iceBuffer: RTCIceCandidateInit[]
   /** ONE worker for every RTCRtpScriptTransform of this peer connection. A
    *  single worker can host many transformers (one per attach). This is what
