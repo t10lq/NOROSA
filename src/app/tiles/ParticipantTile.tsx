@@ -1,6 +1,7 @@
 import { useRef } from 'react'
 import { TileVideo } from './TileVideo'
 import { SpeakerVideo } from './SpeakerVideo'
+import { SpeakerAudio } from './SpeakerAudio'
 import type { SpeakerRouter } from '../../media/speakerRouter'
 import { aliasColor } from '../ui/aliasColor'
 import { MicPath, SlashPath } from '../ui/icons'
@@ -27,6 +28,7 @@ export function toggleTileFullscreen(el: HTMLElement | null): void {
 export function ParticipantTile({ p, large, router }: { p: Participant; large?: boolean; router?: SpeakerRouter }) {
   const rootRef = useRef<HTMLDivElement | null>(null)
   const hasVideo = !!p.stream && p.stream.getVideoTracks().length > 0
+  const hasAudio = !!p.stream && p.stream.getAudioTracks().length > 0
   return (
     <div ref={rootRef} style={{
       position: 'relative', display: 'flex', alignItems: 'center',
@@ -39,6 +41,14 @@ export function ParticipantTile({ p, large, router }: { p: Participant; large?: 
       {hasVideo && (p.id === 'self' || !router
         ? p.stream && <TileVideo stream={p.stream} mirrored={p.id === 'self'} muted={p.id === 'self'} />
         : <SpeakerVideo router={router} peer={p.id} stream={p.stream} />)}
+      {/* Audio-only remote mixes have no video element to ride on — mount the
+          <audio> twin so the peer is actually HEARD. Self tile carries no
+          remote stream, so it never plays back. */}
+      {!hasVideo && hasAudio && p.id !== 'self' && (
+        router
+          ? <SpeakerAudio router={router} peer={p.id} stream={p.stream} />
+          : <audio autoPlay playsInline ref={el => { if (el && el.srcObject !== p.stream) el.srcObject = p.stream }} style={{ display: 'none' }} />
+      )}
       {p.dropping && (
         <div style={{
           position: 'absolute', inset: 0, zIndex: 2, pointerEvents: 'none',

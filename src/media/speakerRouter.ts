@@ -17,7 +17,7 @@
 import { dbg } from '../debug'
 
 interface PeerGraph {
-  el: HTMLVideoElement
+  el: HTMLMediaElement
   full: MediaStream | null
   srcs: MediaStreamAudioSourceNode[]
   gains: GainNode[]
@@ -29,7 +29,7 @@ export class SpeakerRouter {
   private speakerOn = false
   private outputDevice = 'default'
 
-  attach(peer: string, el: HTMLVideoElement, stream: MediaStream): void {
+  attach(peer: string, el: HTMLMediaElement, stream: MediaStream): void {
     const cur = this.byPeer.get(peer)
     if (cur) cur.full = stream
     else this.byPeer.set(peer, { el, full: stream, srcs: [], gains: [] })
@@ -112,12 +112,12 @@ export class SpeakerRouter {
     void g.el.play().catch(() => {})
   }
 
-  private applySink(el: HTMLVideoElement, id: string): void {
-    const v = el as HTMLVideoElement & { setSinkId?: (sink: string) => Promise<void> | void }
-    const fn = v.setSinkId
+  private applySink(el: HTMLMediaElement, id: string): void {
+    const e = el as HTMLMediaElement & { setSinkId?: (sink: string) => Promise<void> | void }
+    const fn = e.setSinkId
     if (fn) {
       try {
-        void Promise.resolve(fn.call(v, id)).catch(() => {})
+        void Promise.resolve(fn.call(e, id)).catch(() => {})
       } catch {
         // setSinkId threw synchronously — non-supporting engine; ignore.
       }
