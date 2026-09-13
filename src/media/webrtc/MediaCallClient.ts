@@ -290,6 +290,10 @@ export class MediaCallClient {
    * how far the media-key negotiation has progressed in the background.
    */
   private ensurePeer(peer: string): PeerEntry | null {
+    // Entrance counter — BEFORE any guard. Two hits for one peer = the dial
+    // layer fired twice (case-2 tell) even though the guard still reuses the
+    // same pc below.
+    console.count(`[debug] ensurePeer enter ${peer}`)
     if (this.disposed || peer === this.svc.selfAlias) return null
     const existing = this.peers.get(peer)
     if (existing) {
@@ -308,6 +312,7 @@ export class MediaCallClient {
       salts: new Promise(res => { saltResolve = res }),
       encAttach: new WeakSet(),
       lastOffer: '',
+      offerSent: false,
       iceBuffer: [],
       worker: null,
     }
@@ -447,11 +452,16 @@ export class MediaCallClient {
     this.bindShareAudio(peer, entry)
 
     if (this.svc.amOfferer(peer) && entry.pc.signalingState === 'stable') {
-      await entry.pc.setLocalDescription(await entry.pc.createOffer())
-      const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
-      const skel = entry.pc.localDescription?.sdp.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
-      console.log('[debug] sent offer', { peer, mLines: ml, mids: skel, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
-      this.svc.sendCallSignal(peer, JSON.stringify({ p: 'offer', d: entry.pc.localDescription!.sdp }))
+      if (entry.offerSent) {
+        console.warn('[media] negotiation-start blocked (offer already sent)', { peer })
+      } else {
+        entry.offerSent = true
+        await entry.pc.setLocalDescription(await entry.pc.createOffer())
+        const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
+        const skel = entry.pc.localDescription?.sdp.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
+        console.log('[debug] sent offer', { peer, mLines: ml, mids: skel, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
+        this.svc.sendCallSignal(peer, JSON.stringify({ p: 'offer', d: entry.pc.localDescription!.sdp }))
+      }
     }
     // ANSWERER: nothing here — answering happens inside handleSignal('offer').
     return { key, send, recv }
