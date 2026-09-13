@@ -27,20 +27,7 @@ interface Participant {
 
 import { MicPath, VidePath, SharePath, ChatPath, ExitPath, SlashPath, CopyPath, CheckPath, GearPath, SpeakerPath, EarPath } from './app/ui/icons'
 import { aliasColor } from './app/ui/aliasColor'
-
-// Simple viewport media query hook — lets the room switch to the mobile
-// layout (single-column tiles, chat full-screen) on narrow screens.
-function useMediaQuery(query: string): boolean {
-  const [matches, setMatches] = useState(() => window.matchMedia(query).matches)
-  useEffect(() => {
-    const mq = window.matchMedia(query)
-    const onChange = () => setMatches(mq.matches)
-    onChange()
-    mq.addEventListener('change', onChange)
-    return () => mq.removeEventListener('change', onChange)
-  }, [query])
-  return matches
-}
+import { useMediaQuery } from './app/ui/useMediaQuery'
 
 // ── SecurityLine ──────────────────────────────────────────────────
 function SecurityLine({ progress }: { progress: number }) {
