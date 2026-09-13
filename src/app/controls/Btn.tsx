@@ -2,18 +2,18 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 
 // ── Control button ────────────────────────────────────────────────
-export function Btn({ onClick, active = true, danger = false, title, pending = false, children }: {
-  onClick: () => void; active?: boolean; danger?: boolean; title: string; pending?: boolean; children: ReactNode
+export function Btn({ onClick, active = true, danger = false, title, pending = false, disabled = false, children }: {
+  onClick: () => void; active?: boolean; danger?: boolean; title: string; pending?: boolean; disabled?: boolean; children: ReactNode
 }) {
   const [hov, setHov] = useState(false)
   return (
-    <button onClick={onClick} title={title}
+    <button onClick={onClick} title={title} disabled={disabled}
       onMouseEnter={() => setHov(true)} onMouseLeave={() => setHov(false)}
       className="tap"
       style={{
-        width: 46, height: 46, borderRadius: '10px', cursor: pending ? 'progress' : 'pointer',
+        width: 46, height: 46, borderRadius: '10px', cursor: pending || disabled ? 'progress' : 'pointer',
         display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-        touchAction: 'manipulation',
+        touchAction: 'manipulation', opacity: disabled ? 0.55 : 1, pointerEvents: disabled ? 'none' : 'auto',
         border: danger
           ? `1px solid ${hov ? 'rgba(179,36,31,0.7)' : 'rgba(179,36,31,0.3)'}`
           : `1px solid ${hov ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.10)'}`,

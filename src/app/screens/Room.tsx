@@ -36,6 +36,9 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
       console.log('[debug] Room unmount — screenSharing', dbgShare.current.s, 'localScreen', dbgShare.current.ls)
     }
   }, [])
+  useEffect(() => {
+    console.log('[debug] share button', { screenSharing: calls.screenSharing, sharePending: calls.sharePending, shareSilent: calls.shareSilent, danger: calls.screenSharing })
+  }, [calls.screenSharing, calls.sharePending, calls.shareSilent])
   const [chatOpen, setChatOpen] = useState(false)
   const [showExit, setShowExit] = useState(false)
   const [ctrlVis, setCtrlVis] = useState(true)
@@ -432,7 +435,7 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
             </Btn>
           )}
           <Btn onClick={() => calls.setScreenShare(!calls.screenSharing)} active={calls.screenSharing}
-            danger={calls.screenSharing} pending={calls.sharePending}
+            danger={calls.screenSharing} pending={calls.sharePending} disabled={calls.sharePending}
             title={calls.screenSharing
               ? 'Stop sharing'
               : 'Share screen — Tab/Window shares with sound · Entire screen shares video only'}>
