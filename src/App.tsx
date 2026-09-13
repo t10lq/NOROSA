@@ -26,13 +26,7 @@ interface Participant {
 }
 
 import { MicPath, VidePath, SharePath, ChatPath, ExitPath, SlashPath, CopyPath, CheckPath, GearPath, SpeakerPath, EarPath } from './app/ui/icons'
-
-// ── Helpers ───────────────────────────────────────────────────────
-function aliasColor(alias: string): string {
-  let h = 0
-  for (let i = 0; i < alias.length; i++) h = (h * 31 + alias.charCodeAt(i)) >>> 0
-  return `hsl(${h % 360} 14% 22%)`
-}
+import { aliasColor } from './app/ui/aliasColor'
 
 // Simple viewport media query hook — lets the room switch to the mobile
 // layout (single-column tiles, chat full-screen) on narrow screens.
