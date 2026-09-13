@@ -1,10 +1,4 @@
 // ── Icons ─────────────────────────────────────────────────────────
-const icon = (d: string, extra?: string) => (size = 16) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
-    stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
-    dangerouslySetInnerHTML={{ __html: d + (extra || '') }} />
-)
-
 export const MicPath = '<rect x="9" y="2" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="9" y1="22" x2="15" y2="22"/>'
 export const VidePath = '<rect x="2" y="7" width="13" height="10" rx="2"/><polyline points="17 9 22 6 22 18 17 15"/>'
 export const SharePath = '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>'
