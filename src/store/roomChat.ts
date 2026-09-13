@@ -77,10 +77,6 @@ export function getChatSafety(peer: string): SafetyStatus | undefined {
   return safetyByPeer[peer]
 }
 
-export function getChatSafetyMap(): Record<string, SafetyStatus> {
-  return safetyByPeer
-}
-
 export function setChatNote(n: string | null) {
   peerNote = n
   emit()

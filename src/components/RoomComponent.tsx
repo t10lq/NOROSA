@@ -7,10 +7,9 @@ import {
   getChatNote,
   getChatPeers,
   getChatSafety,
-  getChatSafetyMap,
   pushLocalMessage,
   subscribeRoomChat,
-} from './roomChat'
+} from '../store/roomChat'
 
 /**
  * Encrypted room chat panel — a pure view over the shared roomChat store.
@@ -38,7 +37,6 @@ export function RoomComponent({ userId, onClose }: { userId: string; onClose?: (
   const messages = getChatMessages()
   const groupId = getChatGroup()
   const peers = getChatPeers()
-  const safetyMap = getChatSafetyMap()
   const peerNote = getChatNote()
   const selfAlias = service?.selfAlias ?? userId
   // Fingerprints visible only for peers actually in the room right now: a

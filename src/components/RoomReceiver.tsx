@@ -9,7 +9,7 @@ import {
   setChatNote,
   setChatPeers,
   setChatSafety,
-} from './roomChat'
+} from '../store/roomChat'
 
 /**
  * Runs the room crypto pipeline for as long as the room view is open —
