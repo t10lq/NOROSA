@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { TileVideo } from './TileVideo'
 import { SpeakerVideo } from './SpeakerVideo'
 import type { SpeakerRouter } from '../../media/speakerRouter'
@@ -10,12 +11,25 @@ export interface Participant {
   dropping: boolean
   /** Remote mix for a peer tile, or the local camera preview for 'self'. */
   stream: MediaStream | null
+  /** The self tile is showing the screen share (no mirror, no camera). */
+  screencast?: boolean
+}
+
+// ── Expand a live tile to the real browser fullscreen ─────────────
+export function toggleTileFullscreen(el: HTMLElement | null): void {
+  if (!el) return
+  if (document.fullscreenElement) {
+    void document.exitFullscreen().catch(() => {})
+  } else {
+    void el.requestFullscreen({ navigationUI: 'hide' }).catch(() => {})
+  }
 }
 
 // ── Participant tile ──────────────────────────────────────────────
 export function ParticipantTile({ p, large, router }: { p: Participant; large?: boolean; router?: SpeakerRouter }) {
+  const rootRef = useRef<HTMLDivElement | null>(null)
   return (
-    <div style={{
+    <div ref={rootRef} style={{
       position: 'relative', display: 'flex', alignItems: 'center',
       justifyContent: 'center', overflow: 'hidden',
       background: aliasColor(p.alias),
@@ -24,7 +38,7 @@ export function ParticipantTile({ p, large, router }: { p: Participant; large?: 
       transition: 'border-color 0.3s ease',
     }}>
       {p.id === 'self' || !router
-        ? p.stream && <TileVideo stream={p.stream} mirrored={p.id === 'self'} muted={p.id === 'self'} />
+        ? p.stream && <TileVideo stream={p.stream} mirrored={p.id === 'self' && !p.screencast} muted={p.id === 'self'} />
         : <SpeakerVideo router={router} peer={p.id} stream={p.stream} />}
       {p.dropping && (
         <div style={{
@@ -38,6 +52,16 @@ export function ParticipantTile({ p, large, router }: { p: Participant; large?: 
             padding: '4px 8px', borderRadius: 4, whiteSpace: 'nowrap',
           }}>DARK — DECRYPTING</span>
         </div>
+      )}
+      {p.stream && (
+        <button onClick={e => { e.stopPropagation(); toggleTileFullscreen(rootRef.current) }}
+          className="tap" title="Fullscreen" style={{
+            position: 'absolute', top: 6, right: 6, zIndex: 3,
+            background: 'rgba(10,10,11,0.45)', border: '1px solid rgba(255,255,255,0.12)',
+            borderRadius: 6, color: 'rgba(240,238,233,0.7)', cursor: 'pointer',
+            width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 11, lineHeight: 1, backdropFilter: 'blur(8px)',
+          }}>⛶</button>
       )}
       <span style={{
         fontFamily: "'Space Mono'", color: p.stream ? 'transparent' : 'rgba(240,238,233,0.45)',

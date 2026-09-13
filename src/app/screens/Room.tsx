@@ -12,12 +12,12 @@ import { Btn } from '../controls/Btn'
 import { ExitConfirm } from '../controls/ExitConfirm'
 import { SettingsModal } from '../controls/SettingsModal'
 import { Participant, ParticipantTile } from '../tiles/ParticipantTile'
+import { TileVideo } from '../tiles/TileVideo'
 
 // ── Room ──────────────────────────────────────────────────────────
 export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: string; onExit: () => void }) {
   const { service } = useE2e()
   const calls = useCalls()
-  const [sharing, setSharing] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [showExit, setShowExit] = useState(false)
   const [ctrlVis, setCtrlVis] = useState(true)
@@ -36,6 +36,7 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
   const [selIn, setSelIn] = useState('default')
   const [selOut, setSelOut] = useState('default')
   const [selCam, setSelCam] = useState('default')
+  const [shareVol, setShareVol] = useState(1)
   const [micHint, setMicHint] = useState<'idle' | 'ready' | 'blocked'>('idle')
   const [camHint, setCamHint] = useState<'idle' | 'ready' | 'blocked'>('idle')
   const [, force] = useReducer(x => x + 1, 0)
@@ -70,12 +71,18 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
   // Real grid: you + every device actually holding keys in this room. No
   // hardcoded guests — whoever is not really here does not render.
   const realPeers = getChatPeers()
+  // During a screen share the self tile shows the screen on stage (streamer
+  // style) and the camera, if live, drops into a small corner PiP instead.
+  const screenLive = calls.screenSharing && !!calls.localScreen
   const all: Participant[] = [
     {
-      id: 'self', alias: selfName, muted, videoOff, speaking: false, dropping: false,
-      stream: calls.localCamera
-        ? new MediaStream([calls.localCamera])
-        : null,
+      id: 'self', alias: selfName, muted, videoOff: screenLive ? false : videoOff,
+      speaking: false, dropping: false, screencast: screenLive || undefined,
+      stream: screenLive
+        ? new MediaStream([calls.localScreen!])
+        : calls.localCamera
+            ? new MediaStream([calls.localCamera])
+            : null,
     },
     ...realPeers.map(p => {
       const remote = calls.remoteStreams.get(p) ?? null
@@ -236,6 +243,17 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
           SECOND TAB OF THIS BROWSER DETECTED — SAME IDENTITY, MEDIA BETWEEN THEM STAYS BLACK
         </div>
       )}
+      {screenLive && (
+        <div style={{
+          position: 'fixed', top: sameDeviceTab ? 124 : 70, left: '50%', transform: 'translateX(-50%)', zIndex: 90,
+          background: 'rgba(28,12,10,0.95)', border: '1px solid rgba(179,36,31,0.6)',
+          borderRadius: 10, padding: '11px 18px', fontFamily: "'Space Mono'", fontSize: 11,
+          letterSpacing: '0.05em', color: '#E5A2A0', backdropFilter: 'blur(20px)',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.6)', whiteSpace: 'nowrap',
+        }}>
+          YOU ARE SHARING YOUR SCREEN — END-TO-END ENCRYPTED
+        </div>
+      )}
       {showExit && <ExitConfirm onConfirm={onExit} onCancel={() => setShowExit(false)} />}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)}
         input={mediaDevices.input} output={mediaDevices.output} camera={mediaDevices.camera}
@@ -285,6 +303,16 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
           position: 'relative',
         }}>
           {all.map(p => <ParticipantTile key={p.id} p={p} large={all.length === 1} router={speakerRouterRef.current ?? undefined} />)}
+          {/* Presenter PiP — the camera keeps talking while the screen is on stage */}
+          {screenLive && calls.localCamera && (
+            <div style={{
+              position: 'absolute', right: 14, bottom: 26, zIndex: 4, width: 172, height: 108,
+              borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.18)',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.5)', background: '#0a0a0b',
+            }}>
+              <TileVideo stream={new MediaStream([calls.localCamera])} mirrored muted />
+            </div>
+          )}
           {/* Leak watermark — every recorded/captured frame is traceable to this
               identity, room and moment. True "is it being recorded?" detection is
               not exposed to web pages, so we mark instead of guess. */}
@@ -298,14 +326,18 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
         </div>
 
         {/* Capture in flight — instant feedback for the camera button */}
-        {(calls.camPending || calls.micPending) && (
+        {(calls.camPending || calls.micPending || calls.sharePending) && (
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px',
             background: 'rgba(30,30,36,0.6)', border: '1px solid rgba(255,255,255,0.12)',
             fontSize: 11, fontFamily: "'Space Mono'", letterSpacing: '0.06em', color: 'rgba(240,238,233,0.8)',
           }}>
             <span style={{ width: 5, height: 5, borderRadius: '50%', background: '#F0EEE9', animation: 'breathe 0.9s ease infinite' }} />
-            {calls.camPending ? 'ENABLING CAMERA — check for the permission prompt…' : 'ENABLING MICROPHONE…'}
+            {calls.sharePending
+              ? 'SHARING SCREEN — pick what to share…'
+              : calls.camPending
+                ? 'ENABLING CAMERA — check for the permission prompt…'
+                : 'ENABLING MICROPHONE…'}
           </div>
         )}
 
@@ -363,10 +395,20 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
                 dangerouslySetInnerHTML={{ __html: speakerOn ? SpeakerPath : EarPath }} />
             </Btn>
           )}
-          <Btn onClick={() => setSharing(s => !s)} active={sharing} title={sharing ? 'Stop sharing' : 'Share screen'}>
+          <Btn onClick={() => calls.setScreenShare(!calls.screenSharing)} active={calls.screenSharing}
+            danger={calls.screenSharing} pending={calls.sharePending}
+            title={calls.screenSharing ? 'Stop sharing' : 'Share screen'}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: SharePath }} />
           </Btn>
+          {calls.screenSharing && !isTouch && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+              <span style={{ fontFamily: "'Space Mono'", fontSize: 9, letterSpacing: '0.1em', color: 'rgba(240,238,233,0.5)', whiteSpace: 'nowrap' }}>SOUND</span>
+              <input type="range" min={0} max={100} value={Math.round(shareVol * 100)}
+                onChange={e => { const v = Number(e.target.value) / 100; setShareVol(v); calls.setShareVolume(v) }}
+                style={{ width: 82, accentColor: '#F0EEE9', cursor: 'pointer' }} />
+            </div>
+          )}
           <Btn onClick={() => setChatOpen(c => !c)} active={chatOpen} title="Chat">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: ChatPath }} />
