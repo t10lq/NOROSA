@@ -54,6 +54,8 @@ type CallSig =
   | { p: 'answer'; d: string }
   | { p: 'ice'; c: RTCIceCandidateInit }
   | { p: 'mute'; on: boolean }
+  /** Explicit teardown notice — the sender closed its local peer connection. */
+  | { p: 'bye' }
 
 // ── The call client ───────────────────────────────────────────────
 
@@ -472,6 +474,17 @@ this.closePeer(alias, 'presence-offline')
       return
     }
 
+    if (sig.p === 'bye') {
+      // Explicit teardown notice: the far side closed its LOCAL peer
+      // connection. Drop ours so we never keep a half-open pair (previously
+      // the remote was never told, leaving stale/black media until a fresh
+      // offer forced a rebuild). The reply chain stops here — a bye-triggered
+      // closePeer never sends a bye back.
+      const target = this.peers.get(from)
+      if (target) this.closePeer(from, 'remote-bye', false)
+      return
+    }
+
     const entry = this.peers.get(from)
     if (!entry) return
 
@@ -690,12 +703,22 @@ this.closePeer(alias, 'presence-offline')
     return this.audioEnabled
   }
 
-  private closePeer(peer: string, reason = 'unknown'): void {
+  private closePeer(peer: string, reason = 'unknown', notifyRemote = true): void {
     const entry = this.peers.get(peer)
     // Who closes a pair determines whether the recreation loop (offer×N for one
     // alias) is a heal, a prune, or a transient failure — log it every time.
     console.log('[debug] closePeer', { peer, reason, hadEntry: !!entry, pcState: entry?.pc.connectionState })
     if (!entry) return
+    // Audit scope 5: a local teardown must be SIGNALED to the far side over
+    // the encrypted channel, or it keeps a half-open pair with stale media
+    // until a fresh offer rebuilds it. Gate on an actual exchange having
+    // happened (descriptions set) — otherwise the bye would mint an unused
+    // ratchet and burn a one-time pre-key for nothing. Never on 'dispose'
+    // (the whole stack is unwinding) and never in reply to a bye (loop).
+    const everNegotiated = !!entry.pc.localDescription || !!entry.pc.remoteDescription
+    if (notifyRemote && reason !== 'dispose' && everNegotiated) {
+      this.svc.sendCallSignal(peer, JSON.stringify({ p: 'bye' }))
+    }
     this.peers.delete(peer)
     this.mediaKeyCache.delete(peer)
     this.decryptFailing.delete(peer)

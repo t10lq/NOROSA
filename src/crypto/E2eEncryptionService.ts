@@ -811,9 +811,12 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
   /** Fire-and-forget an encrypted media-plane frame (SDP/ICE) to one peer.
    *  These ride the 'call' wire type so the relay's 'msg' router never has to
    *  page through them, and the media-plane router (handleCallIncoming) owns
-   *  their one true delivery path. */
+   *  their one true delivery path. A recipient that just left (no keys row
+   *  left to bootstrap a ratchet from) must never surface as an unhandled
+   *  rejection — drop loudly instead. */
   sendCallSignal(peerAlias: string, payload: string): void {
     void this.encryptThenSend(peerAlias, { k: 'call', o: peerAlias, i: 0, b: payload }, 'call')
+      .catch(err => console.warn('[norosa] call signal drop:', err instanceof Error ? err.message : err))
   }
 
   /** Decrypt one media-plane call frame then hand it to the subscriber. */
