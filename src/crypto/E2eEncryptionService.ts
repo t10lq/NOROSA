@@ -26,7 +26,7 @@ import { pad, unpad } from './padding'
 import { b64Decode, b64Encode } from './encoding'
 import { ACCOUNT_KEY, IdbStore, inboundGroupKeyOf, mediaKeyKeyOf, outboundGroupKeyOf, sessionKeyOf } from './idb'
 import { safetyNumber } from './safetynum'
-import { RelayLink } from '../e2ee/relay'
+import { RelayLink } from '../net/relay'
 import type { OneTimePrekey, PublicKeyBundle } from './types'
 
 /**
