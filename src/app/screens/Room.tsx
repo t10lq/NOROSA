@@ -306,7 +306,7 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
           {/* Presenter PiP — the camera keeps talking while the screen is on stage */}
           {screenLive && calls.localCamera && (
             <div style={{
-              position: 'absolute', right: 14, bottom: 26, zIndex: 4, width: 172, height: 108,
+              position: 'absolute', right: 14, bottom: 26, zIndex: 5, width: 172, height: 108,
               borderRadius: 10, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.18)',
               boxShadow: '0 10px 30px rgba(0,0,0,0.5)', background: '#0a0a0b',
             }}>
@@ -317,7 +317,8 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
               identity, room and moment. True "is it being recorded?" detection is
               not exposed to web pages, so we mark instead of guess. */}
           <div style={{
-            position: 'absolute', right: 12, bottom: 10, zIndex: 5, pointerEvents: 'none', userSelect: 'none',
+            position: 'absolute', left: screenLive ? 12 : undefined, right: screenLive ? undefined : 12,
+            bottom: 10, zIndex: 4, pointerEvents: 'none', userSelect: 'none',
             fontFamily: "'Space Mono'", fontSize: 9, letterSpacing: '0.12em',
             color: 'rgba(240,238,233,0.18)', opacity: 0.75,
           }}>
