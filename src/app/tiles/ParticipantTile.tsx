@@ -1,6 +1,6 @@
 import { TileVideo } from './TileVideo'
 import { SpeakerVideo } from './SpeakerVideo'
-import type { SpeakerRouter } from '../../e2ee/speakerRouter'
+import type { SpeakerRouter } from '../../media/speakerRouter'
 import { aliasColor } from '../ui/aliasColor'
 import { MicPath, SlashPath } from '../ui/icons'
 

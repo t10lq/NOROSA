@@ -1,7 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useE2e } from './E2eContext'
-import { MediaCallClient, defaultIceServers, probeEncodedStreamsCaps, type EncodedCapsProbe, type MediaCallEvents } from '../e2ee/webrtc'
+import { MediaCallClient, defaultIceServers, probeEncodedStreamsCaps, type EncodedCapsProbe, type MediaCallEvents } from '../media/webrtc'
 
 /**
  * Media-plane bridge.

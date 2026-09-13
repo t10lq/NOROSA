@@ -1,5 +1,5 @@
 import { useRef, useEffect } from 'react'
-import type { SpeakerRouter } from '../../e2ee/speakerRouter'
+import type { SpeakerRouter } from '../../media/speakerRouter'
 
 // Remote video routed through the SpeakerRouter — re-uses the raw stream but
 // lets the router decide between the WebAudio speakerphone path and the native
