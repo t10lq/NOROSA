@@ -569,7 +569,18 @@ export class MediaCallClient {
       if (this.disposed || !this.peers.has(peer)) return
       let added = false
       if (receiver.track) {
-        console.log('[debug] addTrack', { peer, trackId: receiver.track.id, trackKind: receiver.track.kind, beforeCount: entry.stream.getTracks().length, isNew: !entry.stream.getTracks().includes(receiver.track) })
+        // A healed/re-dialed pc can leave stale same-kind tracks behind; the
+        // tile shows getVideoTracks()[0], so a dead video track from a closed
+        // connection shadows the live one forever. Prune ended tracks of the
+        // same kind as the incoming one so the stream never accumulates.
+        let staleRemoved = 0
+        for (const dead of entry.stream.getTracks()) {
+          if (dead.kind === receiver.track.kind && (dead.readyState === 'ended' || dead === receiver.track)) {
+            entry.stream.removeTrack(dead)
+            staleRemoved++
+          }
+        }
+        console.log('[debug] addTrack', { peer, trackId: receiver.track.id, trackKind: receiver.track.kind, beforeCount: entry.stream.getTracks().length + staleRemoved, isNew: !entry.stream.getTracks().includes(receiver.track), staleRemoved })
         if (!entry.stream.getTracks().includes(receiver.track)) {
           entry.stream.addTrack(receiver.track)
           added = true

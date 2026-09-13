@@ -80,7 +80,8 @@ export class SpeakerRouter {
     // system audio). Route EVERY one of them — speakerphone blends them into
     // the destination, the element path blends them natively.
     const audio = g.full?.getAudioTracks() ?? []
-    const video = g.full?.getVideoTracks()[0] ?? null
+    const video = [...(g.full?.getVideoTracks() ?? [])].filter(t => t.readyState === 'live').pop() ?? null
+    console.log('[debug] speakerRouter.render', { peer, hasAudioTrack: audio.length > 0, hasVideoTrack: !!video })
     this.teardownGraph(g)
 
     if (this.speakerOn && this.ctx && audio.length > 0) {

@@ -22,7 +22,7 @@ export function SpeakerVideo({ router, peer, stream }: { router: SpeakerRouter; 
   useEffect(() => {
     const el = ref.current
     if (!el || !stream) return
-    const v = stream.getVideoTracks()[0]
+    const v = [...stream.getVideoTracks()].filter(t => t.readyState === 'live').pop() ?? null
     if (!v) return
     const onMute = () => { if (ref.current) ref.current.srcObject = null }
     const onUnmute = () => { if (ref.current) router.attach(peer, ref.current as HTMLVideoElement, stream) }
