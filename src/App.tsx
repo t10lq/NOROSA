@@ -8,8 +8,6 @@ import { generateAlias } from './app/ui/namegen'
 import { Lobby } from './app/screens/Lobby'
 import { RoomGate } from './app/screens/boot/RoomGate'
 
-const φ = 1.618033988749895
-
 // ── Types ─────────────────────────────────────────────────────────
 type View = 'lobby' | 'room'
 
@@ -36,7 +34,7 @@ function AppInner({ view, alias, roomCode, onCreateRoom, onJoinRoom, onExit }: {
   onJoinRoom: (code: string) => void
   onExit: () => void
 }) {
-  const [progress, setProgress] = useState(0)
+  const [progress] = useState(0)
   const [loadPct, setLoadPct] = useState(0)
   const [hideLoad, setHideLoad] = useState(false)
   const [loadGone, setLoadGone] = useState(false)
