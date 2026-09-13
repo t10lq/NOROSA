@@ -22,7 +22,7 @@ interface VaultRecord {
   iter: number
 }
 
-export async function hasVault(): Promise<boolean> {
+async function hasVault(): Promise<boolean> {
   return (await IdbStore.get<VaultRecord>(VAULT_KEY)) !== undefined
 }
 
