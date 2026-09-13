@@ -118,6 +118,11 @@ export class RelayLink {
         break
       }
       case 'call': {
+        // Duplicate-delivery sentinel at the TRANSPORT seam: the sender stamps
+        // a fresh UUID per sendCall(). Same id here twice ⇒ the relay/mailbox
+        // delivered one wire twice (transport bug). Two DIFFERENT ids ⇒ the
+        // offerer really sent two wires (client bug further up).
+        console.log('[debug] wire.call rx', { id: wire.id, from: wire.from, len: wire.payload.length })
         this.onCallIncoming(wire.from, wire.payload)
         break
       }

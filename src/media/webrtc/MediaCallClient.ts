@@ -292,7 +292,12 @@ export class MediaCallClient {
   private ensurePeer(peer: string): PeerEntry | null {
     if (this.disposed || peer === this.svc.selfAlias) return null
     const existing = this.peers.get(peer)
-    if (existing) return existing
+    if (existing) {
+      // Tell for re-dials: if the SAME alias runs ensurePeer twice, reuse here
+      // proves no second pc / no extra transceivers ever happen.
+      console.log('[debug] ensurePeer reuse', { peer })
+      return existing
+    }
     if (!insertableStreamsSupported()) return null
 
     const pc = new RTCPeerConnection({ iceServers: this.iceServers })
@@ -444,7 +449,8 @@ export class MediaCallClient {
     if (this.svc.amOfferer(peer) && entry.pc.signalingState === 'stable') {
       await entry.pc.setLocalDescription(await entry.pc.createOffer())
       const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
-      console.log('[debug] sent offer', { peer, mLines: ml, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
+      const skel = entry.pc.localDescription?.sdp.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
+      console.log('[debug] sent offer', { peer, mLines: ml, mids: skel, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
       this.svc.sendCallSignal(peer, JSON.stringify({ p: 'offer', d: entry.pc.localDescription!.sdp }))
     }
     // ANSWERER: nothing here — answering happens inside handleSignal('offer').
@@ -488,6 +494,9 @@ export class MediaCallClient {
       void this.connectTo(from)
       const gotML = sig.d.match(/m=/g)?.length ?? 0
       const fp = `${sig.d.length}:${sig.d.slice(-16)}`
+      // Workaround: filter lines that are SDP headers / mid attribs.
+      const skeleton = sig.d.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
+      console.log('[debug] received offer', { from, mLines: gotML, mids: skeleton, transceivers: entry.pc.getTransceivers().length, receiversBefore: entry.pc.getReceivers().length })
       // Duplicate-delivery guard: the same offer reaching us twice (stale
       // relay, reconnect replay) makes the answerer renegotiate the identical
       // m-lines and DOUBLE every receiver — the tell behind the reproducible
