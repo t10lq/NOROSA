@@ -57,6 +57,10 @@ export interface CallContextValue {
   setCamOn: (on: boolean, deviceId?: string) => void
   /** Start/stop screen sharing (video + separate system-audio channel). */
   setScreenShare: (on: boolean) => void
+  /** Restart the share picker right away (used by the no-audio warning). */
+  retryScreenShare: () => void
+  /** Share is live but carries no system audio (Entire-screen pick). */
+  shareSilent: boolean
   /** Share system-audio volume 0–1 (independent of the mic). */
   setShareVolume: (volume: number) => void
   reconfigureDevices: (micId: string | null, camId: string | null) => void
@@ -74,6 +78,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [micOn, setMicOnState] = useState(true)
   const [camOn, setCamOnState] = useState(false)
   const [screenSharing, setScreenSharing] = useState(false)
+  const [shareSilent, setShareSilent] = useState(false)
   const [localCamera, setLocalCamera] = useState<MediaStreamTrack | null>(null)
   const [localScreen, setLocalScreen] = useState<MediaStreamTrack | null>(null)
   const [micBlocked, setMicBlocked] = useState(false)
@@ -141,6 +146,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         // The presenter killed the share via the browser's own stop bar.
         setScreenSharing(false)
         setLocalScreen(null)
+        setShareSilent(false)
       },
     }
 
@@ -168,6 +174,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setScreenSharing(false)
       setLocalScreen(null)
       setSharePending(false)
+      setShareSilent(false)
     }
   }, [service, isReady])
 
@@ -238,12 +245,40 @@ export function CallProvider({ children }: { children: ReactNode }) {
     void (async () => {
       try {
         await c.setScreenShare(on)
-        setScreenSharing(c.screenOn)
+        const nowOn = c.screenOn
+        setScreenSharing(nowOn)
         setLocalScreen(c.localScreenTrack())
+        setShareSilent(nowOn && !c.shareAudioLive)
       } catch {
         // Picker dismissed / permission denied — nothing is live.
         setScreenSharing(false)
         setLocalScreen(null)
+        setShareSilent(false)
+      } finally {
+        setSharePending(false)
+      }
+    })()
+  }, [])
+
+  const retryScreenShare = useCallback(() => {
+    const c = mediaRef.current
+    if (!c) return
+    setSharePending(true)
+    void (async () => {
+      try {
+        await c.setScreenShare(false)
+        // Let the stop settle before the picker reopens (Chromium can latch on
+        // to the just-freed capture surface).
+        await new Promise(r => setTimeout(r, 100))
+        await c.setScreenShare(true)
+        const nowOn = c.screenOn
+        setScreenSharing(nowOn)
+        setLocalScreen(c.localScreenTrack())
+        setShareSilent(nowOn && !c.shareAudioLive)
+      } catch {
+        setScreenSharing(false)
+        setLocalScreen(null)
+        setShareSilent(false)
       } finally {
         setSharePending(false)
       }
@@ -306,10 +341,12 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setMicOn,
       setCamOn,
       setScreenShare,
+      retryScreenShare,
+      shareSilent,
       setShareVolume,
       reconfigureDevices,
     }),
-    [media, remoteStreams, peerMics, decryptDrops, peerStates, micOn, camOn, screenSharing, camPending, micPending, sharePending, localCamera, localScreen, micBlocked, camBlocked, micError, camError, toggleMic, toggleCam, setMicOn, setCamOn, setScreenShare, setShareVolume, reconfigureDevices],
+    [media, remoteStreams, peerMics, decryptDrops, peerStates, micOn, camOn, screenSharing, camPending, micPending, sharePending, localCamera, localScreen, micBlocked, camBlocked, micError, camError, toggleMic, toggleCam, setMicOn, setCamOn, setScreenShare, retryScreenShare, shareSilent, setShareVolume, reconfigureDevices],
   )
 
   return <CallContext.Provider value={value}>{children}</CallContext.Provider>

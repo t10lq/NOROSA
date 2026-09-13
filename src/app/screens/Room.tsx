@@ -254,6 +254,23 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
           YOU ARE SHARING YOUR SCREEN — END-TO-END ENCRYPTED
         </div>
       )}
+      {calls.shareSilent && (
+        <div style={{
+          position: 'fixed', top: sameDeviceTab ? 186 : (screenLive ? 124 : 70), left: '50%', transform: 'translateX(-50%)', zIndex: 95,
+          background: 'rgba(40,30,12,0.95)', border: '1px solid rgba(220,160,60,0.55)',
+          borderRadius: 10, padding: '10px 16px', fontFamily: "'Space Mono'", fontSize: 10,
+          letterSpacing: '0.04em', color: '#E8C27A', backdropFilter: 'blur(20px)',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', gap: 12,
+          maxWidth: '92vw',
+        }}>
+          <span>NO SYSTEM AUDIO — ENTIRE SCREEN SHARES VIDEO ONLY · PICK A TAB/WINDOW FOR SOUND</span>
+          <button onClick={calls.retryScreenShare} className="tap" style={{
+            flexShrink: 0, background: 'rgba(220,160,60,0.14)', border: '1px solid rgba(220,160,60,0.5)',
+            color: '#E8C27A', padding: '5px 12px', borderRadius: 7, cursor: 'pointer',
+            fontFamily: "'Space Mono'", fontSize: 9, letterSpacing: '0.08em',
+          }}>RETRY WITH TAB</button>
+        </div>
+      )}
       {showExit && <ExitConfirm onConfirm={onExit} onCancel={() => setShowExit(false)} />}
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)}
         input={mediaDevices.input} output={mediaDevices.output} camera={mediaDevices.camera}
@@ -398,7 +415,9 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
           )}
           <Btn onClick={() => calls.setScreenShare(!calls.screenSharing)} active={calls.screenSharing}
             danger={calls.screenSharing} pending={calls.sharePending}
-            title={calls.screenSharing ? 'Stop sharing' : 'Share screen'}>
+            title={calls.screenSharing
+              ? 'Stop sharing'
+              : 'Share screen — Tab/Window shares with sound · Entire screen shares video only'}>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
               dangerouslySetInnerHTML={{ __html: SharePath }} />
           </Btn>

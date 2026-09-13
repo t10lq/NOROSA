@@ -804,6 +804,13 @@ export class MediaCallClient {
     return this.screenSharing
   }
 
+  /** True while the share actually carries system audio (a tab/window was
+   *  picked and Chromium honoured it). Entire-screen picks report no audio
+   *  track even when their "Share audio" checkbox is ticked. */
+  get shareAudioLive(): boolean {
+    return this.shareAudioTrack !== null
+  }
+
   localScreenTrack(): MediaStreamTrack | null {
     return this.screenTrack
   }
