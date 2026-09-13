@@ -372,12 +372,15 @@ export class MediaCallClient {
 
   private wireMedia(peer: string, entry: PeerEntry, saltResolve: (s: { key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }) => void): void {
     entry.pc.ontrack = e => {
-      if (e.track) {
-        console.log('[debug] ontrack addTrack', { peer, trackId: e.track.id, kind: e.track.kind, beforeCount: entry.stream.getTracks().length, isNew: !entry.stream.getTracks().includes(e.track) })
-        entry.stream.addTrack(e.track)
+      if (!e.track) return
+      // Track add + decrypt both run on the single connected-time path
+      // (attachReceiverWhenReady): a pre-connect ontrack neither commits an
+      // unplayable track nor burns the receiver in the WeakSet. Early ontrack
+      // (pc still 'connecting') is swept later by the 'connected' handler's
+      // attachAllReceivers; a repeat ontrack after connect is routed here.
+      if (entry.pc.connectionState === 'connected') {
+        void this.attachReceiverWhenReady(peer, entry, e.receiver)
       }
-      this.events.onStream?.(peer, entry.stream)
-      this.attachReceiverWhenReady(peer, entry, e.receiver)
     }
     void this.prepareMedia(peer, entry).then(
       s => saltResolve(s),
