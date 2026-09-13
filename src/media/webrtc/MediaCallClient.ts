@@ -747,7 +747,7 @@ export class MediaCallClient {
   async setScreenShare(on: boolean): Promise<void> {
     if (on) {
       if (this.screenSharing) return
-      const stream = await this.withTimeout('getDisplayMedia', navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }))
+      const stream = await this.withTimeout('getDisplayMedia', navigator.mediaDevices.getDisplayMedia({ video: true, audio: true }), 60000)
       const video = stream.getVideoTracks()[0]
       if (!video) throw new Error('No screen track available.')
       const sys = stream.getAudioTracks()[0] ?? null
