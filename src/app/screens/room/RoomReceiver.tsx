@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useE2e } from '../context/E2eContext'
+import { useE2e } from '../../../context/E2eContext'
 import {
   getChatGroup,
   getChatSafety,
@@ -9,7 +9,7 @@ import {
   setChatNote,
   setChatPeers,
   setChatSafety,
-} from '../store/roomChat'
+} from '../../../store/roomChat'
 
 /**
  * Runs the room crypto pipeline for as long as the room view is open —

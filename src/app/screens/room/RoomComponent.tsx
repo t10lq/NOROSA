@@ -1,6 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import { useE2e } from '../context/E2eContext'
-import { HedgehogLogo } from './HedgehogLogo'
+import { useE2e } from '../../../context/E2eContext'
+import { HedgehogLogo } from '../../components/HedgehogLogo'
 import {
   getChatGroup,
   getChatMessages,
@@ -9,7 +9,7 @@ import {
   getChatSafety,
   pushLocalMessage,
   subscribeRoomChat,
-} from '../store/roomChat'
+} from '../../../store/roomChat'
 
 /**
  * Encrypted room chat panel — a pure view over the shared roomChat store.

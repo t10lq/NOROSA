@@ -1,4 +1,4 @@
-import { HedgehogLogo } from '../../components/HedgehogLogo'
+import { HedgehogLogo } from '../components/HedgehogLogo'
 
 // ── Exit confirm ──────────────────────────────────────────────────
 export function ExitConfirm({ onConfirm, onCancel }: { onConfirm: () => void; onCancel: () => void }) {

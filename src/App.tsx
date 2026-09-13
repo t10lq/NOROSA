@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { LoadingScreen } from './components/LoadingScreen'
+import { LoadingScreen } from './app/components/LoadingScreen'
 import { E2eProvider } from './context/E2eContext'
 import { openDeviceKey } from './e2ee/vault'
 import { formatRoomCode, generateRoomCode, hashRoomCode, isValidCode, normalizeRoomCode } from './e2ee/roomcode'

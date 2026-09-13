@@ -1,4 +1,4 @@
-import { HedgehogLogo } from '../../../components/HedgehogLogo'
+import { HedgehogLogo } from '../../components/HedgehogLogo'
 
 export function JoinRejected({ reason, onBack }: { reason: string; onBack: () => void }) {
   return (

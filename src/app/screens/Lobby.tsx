@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { HedgehogLogo } from '../../components/HedgehogLogo'
+import { HedgehogLogo } from '../components/HedgehogLogo'
 import { normalizeRoomCode, isValidCode } from '../../e2ee/roomcode'
 import { useMediaQuery } from '../ui/useMediaQuery'
 
