@@ -20,8 +20,11 @@ export type PeerEntry = {
    *  duplicate deliveries that would otherwise renegotiate and duplicate
    *  m-lines on the answering pc. */
   lastOffer: string
-  /** One offer per pair — the negotiation-start gate (case-2 guard). */
-  offerSent: boolean
+  /** One offer per pair — the negotiation-start gate (case-2 guard). Cleared
+   *  on every return to `stable`, so a LEGITIMATE future renegotiation
+   *  (ICE restart, re-offer) is never silently blocked — only the immediate
+   *  duplicate of the in-flight attempt is. */
+  offerInFlight: boolean
   iceBuffer: RTCIceCandidateInit[]
   /** ONE worker for every RTCRtpScriptTransform of this peer connection. A
    *  single worker can host many transformers (one per attach). This is what

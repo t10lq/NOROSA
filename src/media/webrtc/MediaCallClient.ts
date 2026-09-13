@@ -312,7 +312,7 @@ export class MediaCallClient {
       salts: new Promise(res => { saltResolve = res }),
       encAttach: new WeakSet(),
       lastOffer: '',
-      offerSent: false,
+      offerInFlight: false,
       iceBuffer: [],
       worker: null,
     }
@@ -363,6 +363,7 @@ export class MediaCallClient {
     pc.onconnectionstatechange = () => {
       this.events.onPeerState?.(peer, pc.connectionState)
       if (pc.connectionState === 'connected') {
+        entry.offerInFlight = false
         if (entry.audioSender?.track) void this.attachSend(peer, entry.audioSender, 'audio', entry.audioSender.track)
         if (entry.videoSender?.track && (this.videoEnabled || this.screenSharing)) void this.attachSend(peer, entry.videoSender, 'video', entry.videoSender.track)
         // Belt-and-suspenders decrypt: some browsers never fire ontrack for a
@@ -452,15 +453,17 @@ export class MediaCallClient {
     this.bindShareAudio(peer, entry)
 
     if (this.svc.amOfferer(peer) && entry.pc.signalingState === 'stable') {
-      if (entry.offerSent) {
-        console.warn('[media] negotiation-start blocked (offer already sent)', { peer })
+      if (entry.offerInFlight) {
+        console.warn('[media] negotiation-start blocked (offer already in flight)', { peer })
       } else {
-        entry.offerSent = true
+        entry.offerInFlight = true
         await entry.pc.setLocalDescription(await entry.pc.createOffer())
         const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
         const skel = entry.pc.localDescription?.sdp.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
         console.log('[debug] sent offer', { peer, mLines: ml, mids: skel, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
         this.svc.sendCallSignal(peer, JSON.stringify({ p: 'offer', d: entry.pc.localDescription!.sdp }))
+        // Offer is out — future renegotiation is the caller's business now.
+        entry.offerInFlight = false
       }
     }
     // ANSWERER: nothing here — answering happens inside handleSignal('offer').
