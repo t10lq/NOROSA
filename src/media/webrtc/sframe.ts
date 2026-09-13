@@ -27,6 +27,14 @@ export type PeerEntry = {
    *  leaked threads with every auto-heal cycle until Chrome threw
    *  "Too many active Worker threads". Terminated in closePeer. */
   worker: Worker | null
+  /** Pair-effective encryption mode. TRUE only when BOTH ends carry the
+   *  transform layer (device capability advertised on every offer/answer).
+   *  FALSE = this pair runs plain WebRTC media — still DTLS-SRTP encrypted
+   *  end-to-end at the transport level, but without the post-transform E2EE
+   *  layer (see MediaCallClient). Crypto attach must consult this flag, never
+   *  the device-level capability alone: encrypting while the far side cannot
+   *  decrypt turns into garbage audio. */
+  e2ee: boolean
 }
 
 // ── SFrame-like framing (pure crypto helpers) ─────────────────────

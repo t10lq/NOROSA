@@ -59,6 +59,22 @@ export class SpeakerRouter {
     for (const g of this.byPeer.values()) this.applySink(g.el, sink)
   }
 
+  /**
+   * First-gesture playback unlock. iOS Safari / Android Chrome refuse
+   * unmuted play() outside a user gesture; the attach-path call was said
+   * no. Re-run play() on every attached sink (plus a suspended AudioContext
+   * resume) so the first tap/click/keydown actually starts remote audio.
+   * Safe to call repeatedly — play() idempotent-ish and errors swallowed.
+   */
+  unlock(): void {
+    this.ensureCtx()
+    for (const g of this.byPeer.values()) {
+      if (g.full) g.el.srcObject = g.full
+      this.applySink(g.el, this.outputDevice)
+      if (g.el.srcObject) void g.el.play().catch(() => {})
+    }
+  }
+
   reset(): void {
     for (const peer of [...this.byPeer.keys()]) this.detach(peer)
     this.speakerOn = false

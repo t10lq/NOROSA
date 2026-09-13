@@ -41,6 +41,22 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
   const isTouch = useMediaQuery('(hover: none) and (pointer: coarse)')
   const speakerRouterRef = useRef<SpeakerRouter | null>(null)
   if (!speakerRouterRef.current) speakerRouterRef.current = new SpeakerRouter()
+  // iOS/Android refuse unmuted play() outside a user gesture — re-run it on
+  // the first pointer/touch/key so remote audio actually starts on phones.
+  const unlockedRef = useRef(false)
+  useEffect(() => {
+    const unlock = () => {
+      unlockedRef.current = true
+      speakerRouterRef.current?.unlock()
+    }
+    const evs = ['pointerdown', 'touchstart', 'keydown', 'click'] as const
+    for (const ev of evs) window.addEventListener(ev, unlock, { once: true, passive: true })
+    const t = setTimeout(() => speakerRouterRef.current?.unlock(), 2500)
+    return () => {
+      for (const ev of evs) window.removeEventListener(ev, unlock)
+      clearTimeout(t)
+    }
+  }, [])
   const [speakerOn, setSpeakerOn] = useState(false)
   useEffect(() => () => speakerRouterRef.current?.reset(), [])
   const toggleSpeaker = () => {
@@ -176,15 +192,26 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
     <div style={{ height: '100%', display: 'flex', background: '#0A0A0B', position: 'relative', overflow: 'hidden' }}
       onMouseMove={nudge}>
 
-      {!calls.supported && (
+      {calls.supported === false && (
         <div style={{
           position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 90,
-          background: 'rgba(12,12,14,0.95)', border: '1px solid rgba(179,36,31,0.45)',
+          background: 'rgba(20,16,8,0.95)', border: '1px solid rgba(201,150,60,0.5)',
           borderRadius: 10, padding: '11px 18px', fontFamily: "'Space Mono'", fontSize: 11,
-          letterSpacing: '0.05em', color: '#B3241F', backdropFilter: 'blur(20px)',
+          letterSpacing: '0.05em', color: '#E5B052', backdropFilter: 'blur(20px)',
           boxShadow: '0 8px 40px rgba(0,0,0,0.6)', whiteSpace: 'nowrap',
         }}>
-          THIS BROWSER CANNOT RUN E2E MEDIA — CHAT ONLY
+          ENCRYPTED · DTLS-SRTP MODE — THIS BROWSER LACKS THE E2EE TRANSFORM LAYER
+        </div>
+      )}
+      {calls.cryptoMode === 'mixed' && calls.supported && (
+        <div style={{
+          position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 90,
+          background: 'rgba(20,16,8,0.95)', border: '1px solid rgba(201,150,60,0.5)',
+          borderRadius: 10, padding: '11px 18px', fontFamily: "'Space Mono'", fontSize: 11,
+          letterSpacing: '0.05em', color: '#E5B052', backdropFilter: 'blur(20px)',
+          boxShadow: '0 8px 40px rgba(0,0,0,0.6)', whiteSpace: 'nowrap', maxWidth: '85vw',
+        }}>
+          A PEER LACKS THE E2EE TRANSFORM LAYER — ITS AUDIO LINK RUNS ON DTLS-SRTP
         </div>
       )}
       {!calls.supported && calls.supportReason && (
@@ -243,7 +270,7 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
             {!isMobile && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 <div style={{ width: 5, height: 5, borderRadius: '50%', background: 'rgba(240,238,233,0.3)', animation: 'breathe 3s ease infinite' }} />
-                <span style={{ fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.08em', color: '#3A3A3F' }}>E2E ENCRYPTED</span>
+                <span style={{ fontFamily: "'Space Mono'", fontSize: 10, letterSpacing: '0.08em', color: '#3A3A3F' }}>{calls.cryptoMode === 'e2ee' ? 'E2E ENCRYPTED' : 'DTLS-SRTP ENCRYPTED'}</span>
               </div>
             )}
             <span style={{ fontFamily: "'Space Mono'", fontSize: 10, color: '#3A3A3F', letterSpacing: '0.06em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '38vw' }}>{selfName}</span>

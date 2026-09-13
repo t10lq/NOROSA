@@ -24,10 +24,14 @@
  *     the existing double ratchet (service.mediaKeyFor) — the blind relay
  *     only ever sees ciphertext.
  *
- * Support: Chrome/Edge ≥89, Firefox ≥117, Safari ≥18. The transform is wired
- * with the function-based RTCRtpScriptTransform (a TransformStream piped
- * between readable→writable), falling back to a Blob worker where that form
- * is unavailable.
+ * Support: the transform layer needs Chrome/Edge ≥89, Firefox ≥117, Safari
+ * ≥18 — the transform is wired with the function-based RTCRtpScriptTransform
+ * (a TransformStream piped between readable→writable), falling back to a Blob
+ * worker where that form is unavailable. Browsers without that layer (older
+ * Safari/iOS/WebViews) negotiate a LEGACY pair: seamless plain WebRTC media,
+ * still encrypted end-to-end at the transport level by DTLS-SRTP, but without
+ * the post-transform E2EE layer. The capability rides on every offer/answer,
+ * so a mixed room silently falls back per pair instead of garbling audio.
  */
 
 import { E2eEncryptionService } from '../../crypto/E2eEncryptionService'
@@ -51,12 +55,15 @@ export interface MediaCallEvents {
 
 // ── Signaling payloads (inside the double-ratchet envelope) ───────
 type CallSig =
-  | { p: 'offer'; d: string }
-  | { p: 'answer'; d: string }
+  | { p: 'offer'; d: string; e: boolean }
+  | { p: 'answer'; d: string; e: boolean }
   | { p: 'ice'; c: RTCIceCandidateInit }
   | { p: 'mute'; on: boolean }
   /** Explicit teardown notice — the sender closed its local peer connection. */
   | { p: 'bye' }
+
+/** Empty-slot placeholder for legacy pairs (no transform layer uses it). */
+const u8z = (): Uint8Array<ArrayBuffer> => new Uint8Array(0) as Uint8Array<ArrayBuffer>
 
 // ── The call client ───────────────────────────────────────────────
 
@@ -84,10 +91,25 @@ export class MediaCallClient {
     private svc: E2eEncryptionService,
     private events: MediaCallEvents = {},
     private iceServers: RTCIceServer[] = fallbackIceServers(),
+    /** Device-level transform-layer capacity (deep probe, not the light ctor
+     *  check). When false every pair falls back to plain DTLS-SRTP media. */
+    private e2eeSupported = insertableStreamsSupported(),
   ) {}
 
   get supported(): boolean {
-    return insertableStreamsSupported()
+    return this.e2eeSupported
+  }
+
+  /**
+   * Honest room-level encryption label. 'e2ee' only when every live pair uses
+   * the transform layer; 'legacy' when THIS device cannot; 'mixed' when a live
+   * peer lacks it (that pair runs DTLS-SRTP, not E2EE).
+   */
+  encryptionMode(): 'e2ee' | 'legacy' | 'mixed' {
+    if (!this.e2eeSupported) return 'legacy'
+    const peers = [...this.peers.values()]
+    if (peers.length === 0) return 'e2ee'
+    return peers.every(p => p.e2ee) ? 'e2ee' : 'mixed'
   }
 
   remoteStream(peerAlias: string): MediaStream | null {
@@ -101,7 +123,6 @@ export class MediaCallClient {
   async start(): Promise<void> {
     if (this.started) return
     this.started = true
-    if (!insertableStreamsSupported()) return
 
     this.svc.onCall((from, payload) => {
       void this.handleSignal(from, payload)
@@ -248,8 +269,7 @@ this.closePeer(alias, 'presence-offline')
     }
     // hadEntryBefore=false 4× for one alias = something wiped the entry between
     // calls (closePeer) — the recreation loop, not a guard failure.
-    dbg('ensurePeer create', { peer, hadEntryBefore: !!existing })
-    if (!insertableStreamsSupported()) return null
+    dbg('ensurePeer create', { peer, hadEntryBefore: !!existing, e2eeSupported: this.e2eeSupported })
 
     const pc = new RTCPeerConnection({ iceServers: this.iceServers })
     const stream = new MediaStream()
@@ -262,6 +282,9 @@ this.closePeer(alias, 'presence-offline')
       offerInFlight: false,
       iceBuffer: [],
       worker: null,
+      // Initial assumption: full E2EE for the pair. Refined by the peer's
+      // advertised capability on its offer/answer — both sides then converge.
+      e2ee: this.e2eeSupported,
     }
     this.peers.set(peer, entry)
 
@@ -277,7 +300,7 @@ this.closePeer(alias, 'presence-offline')
     // LEGACY model: encoded streams MUST exist synchronously at negotiation;
     // Chromium throws "Too late to create encoded streams" once RTP is flowing.
     // MODERN model: sender.transform assignment works anytime — skip.
-    if (encodedTransformModel() === 'legacy') {
+    if (this.e2eeSupported && encodedTransformModel() === 'legacy') {
       try {
         const s = (aT.sender as unknown as EncodedStreamHost).createEncodedStreams()
         senderStreamCache.set(aT.sender, s)
@@ -359,24 +382,36 @@ this.closePeer(alias, 'presence-offline')
    * up — nothing here blocks that path.
    */
   private async prepareMedia(peer: string, entry: PeerEntry): Promise<{ key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }> {
-    // The media-key handshake can race the peer's first key upload (a thread
-    // joins → presence fires → we dial → their bundle is still being uploaded
-    // for a second or two). Retry with backoff instead of tearing the entry
-    // down: the message above-cache fix also stops a failed mint from being
-    // served to every retry.
-    const key = await this.withRetries(
-      () => this.mediaKeyFor(peer),
-      err => {
-        if (!(err instanceof Error)) return false
-        return err.message.includes('never received the media key') ||
-          err.message.includes('never delivered the media key')
-      },
-      8,
-      700,
-    )
-    dbg('media key ready for', peer)
-    const send = await deriveSalt(key, peer) // encrypt our sends TO this peer
-    const recv = await deriveSalt(key, this.svc.selfAlias ?? '') // decrypt THEIR sends
+    let key: Uint8Array
+    let send: Uint8Array<ArrayBuffer>
+    let recv: Uint8Array<ArrayBuffer>
+    if (!this.e2eeSupported) {
+      // No transform layer on this device — media flows plain over the pair's
+      // DTLS-SRTP (the transport still encrypts it end to end). Resolve the
+      // salts slot with zeros: nothing that consumes it is wired in this mode.
+      dbg('legacy device — plain DTLS-SRTP pair, skipping media key', peer)
+      key = u8z(); send = u8z(); recv = u8z()
+    } else {
+      // The media-key handshake can race the peer's first key upload (a thread
+      // joins → presence fires → we dial → their bundle is still being uploaded
+      // for a second or two). Retry with backoff instead of tearing the entry
+      // down: the message above-cache fix also stops a failed mint from being
+      // served to every retry.
+      const k = await this.withRetries(
+        () => this.mediaKeyFor(peer),
+        err => {
+          if (!(err instanceof Error)) return false
+          return err.message.includes('never received the media key') ||
+            err.message.includes('never delivered the media key')
+        },
+        8,
+        700,
+      )
+      dbg('media key ready for', peer)
+      send = await deriveSalt(k, peer) // encrypt our sends TO this peer
+      recv = await deriveSalt(k, this.svc.selfAlias ?? '') // decrypt THEIR sends
+      key = k
+    }
 
     // Mic permission is NEVER a connection blocker — audio m-line exists, and
     // the track drops in via replaceTrack the moment it is granted.
@@ -397,7 +432,7 @@ this.closePeer(alias, 'presence-offline')
         const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
         const skel = entry.pc.localDescription?.sdp.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
         dbg('sent offer', { peer, mLines: ml, mids: skel, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
-        this.svc.sendCallSignal(peer, JSON.stringify({ p: 'offer', d: entry.pc.localDescription!.sdp }))
+        this.svc.sendCallSignal(peer, JSON.stringify({ p: 'offer', d: entry.pc.localDescription!.sdp, e: this.e2eeSupported }))
         // Offer is out — future renegotiation is the caller's business now.
         entry.offerInFlight = false
       }
@@ -437,6 +472,10 @@ this.closePeer(alias, 'presence-offline')
       // key here: that only gates the (background) crypto attachment.
       const entry = this.ensurePeer(from)
       if (!entry) return
+      // Pair-effective mode: E2EE only when BOTH ends carry the transform
+      // layer. The answer echoes our own capability so the offerer converges.
+      entry.e2ee = this.e2eeSupported && (sig.e ?? this.e2eeSupported)
+      dbg('pair mode decided (offerer)', { peer: from, e2ee: entry.e2ee, theirCaps: sig.e, ourCaps: this.e2eeSupported })
       // Subtle: connectTo() is what kicks the shared background prepareMedia,
       // so the salts eventually resolve and the counters stay in sync even
       // when this offer was the very first sight of the peer.
@@ -463,7 +502,7 @@ this.closePeer(alias, 'presence-offline')
         await entry.pc.setRemoteDescription({ type: 'offer', sdp: sig.d })
         dbg('answered offer', { from, receiversAfter: entry.pc.getReceivers().length, mLines: entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0 })
         await entry.pc.setLocalDescription(await entry.pc.createAnswer())
-        this.svc.sendCallSignal(from, JSON.stringify({ p: 'answer', d: entry.pc.localDescription!.sdp }))
+        this.svc.sendCallSignal(from, JSON.stringify({ p: 'answer', d: entry.pc.localDescription!.sdp, e: this.e2eeSupported }))
         await this.flushIce(entry)
       } catch (err) {
         console.warn('[media] answer failed:', err instanceof Error ? err.message : err)
@@ -495,6 +534,11 @@ this.closePeer(alias, 'presence-offline')
     if (!entry) return
 
     if (sig.p === 'answer') {
+      // Pair-effective mode settled once the offerer learns their capability
+      // (the answerer already decided at the offer — both converge on the
+      // same flag): E2EE only when BOTH ends carry the transform layer.
+      entry.e2ee = this.e2eeSupported && (sig.e ?? this.e2eeSupported)
+      dbg('pair mode decided (answerer)', { peer: from, e2ee: entry.e2ee, theirCaps: sig.e, ourCaps: this.e2eeSupported })
       try {
         await entry.pc.setRemoteDescription({ type: 'answer', sdp: sig.d })
         await this.flushIce(entry)
@@ -524,7 +568,7 @@ this.closePeer(alias, 'presence-offline')
   }
 
   private async attachReceiverWhenReady(peer: string, entry: PeerEntry, receiver: RTCRtpReceiver): Promise<void> {
-    dbg('attachReceiver', { peer, receiverId: receiver.track?.id, pcReceivers: entry.pc.getReceivers().length, alreadyAttached: this.attachedReceivers.has(receiver), pc: entry.pc.connectionState })
+    dbg('attachReceiver', { peer, receiverId: receiver.track?.id, pcReceivers: entry.pc.getReceivers().length, alreadyAttached: this.attachedReceivers.has(receiver), pc: entry.pc.connectionState, e2ee: entry.e2ee })
     if (this.attachedReceivers.has(receiver)) return
     if (entry.pc.connectionState !== 'connected') return
     if (!receiver.track || receiver.track.readyState === 'ended') return
@@ -533,20 +577,26 @@ this.closePeer(alias, 'presence-offline')
     // task, before the first await) — LEGACY model only. MODERN engines wire
     // decrypt via receiver.transform (no encoded-stream plumbing at all), and
     // createEncodedStreams on top of a .transform assignment would double up.
+    // Legacy PAIRS (one end without the transform layer) skip this entirely —
+    // plain DTLS-SRTP media needs neither streams nor a decrypt transform.
     const modern = encodedTransformModel() === 'modern'
     let streams: EncodedStreams | null = null
     if (!modern) {
-      streams = receiverStreamCache.get(receiver) ?? null
-      if (!streams) {
-        try {
-          streams = (receiver as unknown as EncodedStreamHost).createEncodedStreams()
-          receiverStreamCache.set(receiver, streams)
-        } catch (err) {
-          // Possible only on the belt-and-suspenders path ('connected' fallback
-          // where ontrack never fired for a sendrecv m-line). Media is already
-          // flowing there; the primary ontrack path always succeeds.
-          console.warn('[media] receiver encoded streams too late:', err instanceof Error ? err.message : err)
-          return
+      if (!entry.e2ee) {
+        dbg('legacy pair — plain DTLS-SRTP receiver, no encoded streams', peer)
+      } else {
+        streams = receiverStreamCache.get(receiver) ?? null
+        if (!streams) {
+          try {
+            streams = (receiver as unknown as EncodedStreamHost).createEncodedStreams()
+            receiverStreamCache.set(receiver, streams)
+          } catch (err) {
+            // Possible only on the belt-and-suspenders path ('connected' fallback
+            // where ontrack never fired for a sendrecv m-line). Media is already
+            // flowing there; the primary ontrack path always succeeds.
+            console.warn('[media] receiver encoded streams too late:', err instanceof Error ? err.message : err)
+            return
+          }
         }
       }
     }
@@ -585,12 +635,16 @@ this.closePeer(alias, 'presence-offline')
           }
         }
       }
-      if (streams) {
-        attachReceiverCrypto(receiver, streams, entry, salts.key, salts.recv, () => this.noteFrameDrop(peer))
+      if (entry.e2ee) {
+        if (streams) {
+          attachReceiverCrypto(receiver, streams, entry, salts.key, salts.recv, () => this.noteFrameDrop(peer))
+        } else {
+          attachReceiverCrypto(receiver, null as unknown as EncodedStreams, entry, salts.key, salts.recv, () => this.noteFrameDrop(peer))
+        }
+        dbg('decrypt attached', { peer, e2ee: entry.e2ee })
       } else {
-        attachReceiverCrypto(receiver, null as unknown as EncodedStreams, entry, salts.key, salts.recv, () => this.noteFrameDrop(peer))
+        dbg('legacy pair — decrypt skipped (plain DTLS-SRTP media)', peer)
       }
-      dbg('decrypt attached', { peer })
       if (added) this.events.onStream?.(peer, entry.stream)
       dbg('receiver attached', { peer, tracks: entry.stream.getTracks().map(t => ({ kind: t.kind, enabled: t.enabled, readyState: t.readyState, id: t.id })) })
     } catch (err) {
@@ -636,13 +690,14 @@ this.closePeer(alias, 'presence-offline')
     // left the peer with undecryptable frames (permanent black). Callers pass
     // the exact track they just replaceTrack()'d in instead.
     const t = track ?? sender.track
-    const alreadyBool = this.disposed || !entry || entry.encAttach.has(sender)
-    dbg('attachSend called', { peer, kind, hasTrack: !!t, already: alreadyBool })
+    const alreadyBool = this.disposed || !entry || entry.encAttach.has(sender) || !entry.e2ee
+    dbg('attachSend called', { peer, kind, hasTrack: !!t, already: alreadyBool, e2ee: entry?.e2ee ?? false })
     // One encrypt transform per sender for life — modern engines keep
     // `sender.transform` across replaceTrack, so a re-assign mid-life would
     // tear the worker pipe (InvalidStateError) and kill the video instead of
-    // healing it.
-    if (!entry || entry.encAttach.has(sender) || !t) return
+    // healing it. A legacy pair (no transform layer on one end) sends PLAIN
+    // media over the pair's DTLS-SRTP — encrypting here would garble it.
+    if (!entry || entry.encAttach.has(sender) || !t || !entry.e2ee) return
     const failKey = `${peer}:${kind}`
     void entry.salts.then(async salts => {
       if (this.disposed || !this.peers.get(peer) || entry.encAttach.has(sender)) return

@@ -17,8 +17,10 @@ import { MediaCallClient, defaultIceServers, probeEncodedStreamsCaps, type Encod
  * replaceTrack). Blocked grants are surfaced as micBlocked so the room can
  * show a clear hint instead of a silent failure.
  *
- * When the browser lacks RTCRtpScriptTransform the provider stays live but
- * supported=false; the room then renders without media rather than crashing.
+ * When the browser lacks RTCRtpScriptTransform the provider stays live with
+ * supported=false — pairs then run plain DTLS-SRTP media (still encrypted end
+ * to end at the transport level, minus the post-transform E2EE layer) and the
+ * room surfaces an honest cryptoMode badge instead of hiding media.
  */
 
 export interface CallContextValue {
@@ -27,6 +29,10 @@ export interface CallContextValue {
   supported: boolean
   /** Human reason from the deep capability probe when unsupported. */
   supportReason: string | null
+  /** Honest room label: 'e2ee' (every pair uses the transform layer),
+   *  'legacy' (this device cannot — all pairs run DTLS-SRTP), or 'mixed'
+   *  (one live peer lacks the layer; that pair runs DTLS-SRTP). */
+  cryptoMode: 'e2ee' | 'legacy' | 'mixed'
   /** Remote mix per peer alias — a fresh Map instance on every change. */
   remoteStreams: ReadonlyMap<string, MediaStream>
   /** Per-peer mic muted state, driven by explicit mute signaling. */
@@ -60,6 +66,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [micError, setMicError] = useState<string | null>(null)
   const [micPending, setMicPending] = useState(false)
   const [supportProbe, setSupportProbe] = useState<EncodedCapsProbe | null>(null)
+  const [cryptoMode, setCryptoMode] = useState<'e2ee' | 'legacy' | 'mixed'>('e2ee')
 
   const mediaRef = useRef<MediaCallClient | null>(null)
   const micOnRef = useRef(micOn)
@@ -75,6 +82,9 @@ export function CallProvider({ children }: { children: ReactNode }) {
     dbg('media capability probe →', JSON.stringify(probe))
     setSupportProbe(probe)
 
+    let client: MediaCallClient | null = null
+    const refreshMode = () => { if (client) setCryptoMode(client.encryptionMode()) }
+
     const events: MediaCallEvents = {
       onStream: (peer, stream) => {
         setRemoteStreams(prev => {
@@ -89,9 +99,11 @@ export function CallProvider({ children }: { children: ReactNode }) {
           next.delete(peer)
           return next
         })
+        refreshMode()
       },
       onPeerState: (peer, state) => {
         setPeerStates(prev => new Map(prev).set(peer, state))
+        refreshMode()
       },
       onFrameDrop: (peer) => {
         setDecryptDrops(prev => new Map(prev).set(peer, true))
@@ -109,14 +121,14 @@ export function CallProvider({ children }: { children: ReactNode }) {
       },
     }
 
-    let client: MediaCallClient | null = null
     let cancelled = false
     void (async () => {
       // TURN creds are minted at runtime (static-auth-secret REST scheme) — a
       // short await that resolves instantly when no TURN is configured.
       const ice = await defaultIceServers()
       if (cancelled) return
-      client = new MediaCallClient(service, events, ice)
+      client = new MediaCallClient(service, events, ice, probe?.supported ?? false)
+      refreshMode()
       mediaRef.current = client
       setMedia(client)
       void client.start()
@@ -181,6 +193,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       media,
       supported: supportProbe?.supported ?? false,
       supportReason: supportProbe?.reason ?? null,
+      cryptoMode,
       remoteStreams,
       peerMics,
       decryptDrops,
@@ -193,7 +206,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setMicOn,
       reconfigureDevices,
     }),
-    [media, remoteStreams, peerMics, decryptDrops, peerStates, micOn, micPending, micBlocked, micError, toggleMic, setMicOn, reconfigureDevices],
+    [media, cryptoMode, remoteStreams, peerMics, decryptDrops, peerStates, micOn, micPending, micBlocked, micError, toggleMic, setMicOn, reconfigureDevices],
   )
 
   return <CallContext.Provider value={value}>{children}</CallContext.Provider>
