@@ -9,7 +9,6 @@ export const MicPath = '<rect x="9" y="2" width="6" height="11" rx="3"/><path d=
 export const VidePath = '<rect x="2" y="7" width="13" height="10" rx="2"/><polyline points="17 9 22 6 22 18 17 15"/>'
 export const SharePath = '<rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>'
 export const ChatPath = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><line x1="8" y1="9" x2="16" y2="9"/><line x1="8" y1="13" x2="13" y2="13"/>'
-export const ShieldPath = '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>'
 export const ExitPath = '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/>'
 
 export const SlashPath = '<line x1="4" y1="4" x2="20" y2="20" stroke="#B3241F" stroke-width="1.5"/>'
