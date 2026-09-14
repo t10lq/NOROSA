@@ -170,10 +170,10 @@ private constructor(
   private callDelivered = new Map<string, number>()
   private callDropped = new Map<string, number>()
   private frameNotes: string[] = []
-  private noteFrame(peer: string, wire: string, ok: boolean, err?: string): void {
+  private noteFrame(peer: string, wire: string, ok: boolean, tagOrErr?: string): void {
     if (ok) this.callDelivered.set(peer, (this.callDelivered.get(peer) ?? 0) + 1)
     else this.callDropped.set(peer, (this.callDropped.get(peer) ?? 0) + 1)
-    const line = `${new Date().toISOString().slice(11, 19)} ${peer.slice(0, 6)} ${wire} ${ok ? 'OK' : 'DROP ' + (err ?? '')}`
+    const line = `${new Date().toISOString().slice(11, 19)} ${peer.slice(0, 6)} ${wire} ${ok ? (tagOrErr ?? 'OK') : 'DROP ' + (tagOrErr ?? '')}`
     this.frameNotes.push(line)
     if (this.frameNotes.length > 6) this.frameNotes.shift()
   }
@@ -667,9 +667,15 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
         case 'media-key': {
           // The AES-256 media key for our call pair — rides the ratchet so the
           // relay never sees a byte of it. Base64-decoded into the waiting PC.
-          const share = JSON.parse(await this.decryptEnvelopeRaw(from, env)) as { km: string }
-          this.acceptMediaKey(from, base64ToBytes(share.km))
-          this.noteFrame(from, 'key', true)
+          try {
+            const share = JSON.parse(await this.decryptEnvelopeRaw(from, env)) as { km: string }
+            this.acceptMediaKey(from, base64ToBytes(share.km))
+            this.noteFrame(from, 'key', true, 'mkey')
+          } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err)
+            console.warn('[norosa] dropped media-key frame:', reason)
+            this.noteFrame(from, 'key', false, reason)
+          }
           break
         }
         case 'call': {
@@ -862,7 +868,9 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
         this.noteFrame(from, 'call', true, 'ack')
         return ''
       }
-      this.noteFrame(from, 'call', true)
+      let tag = 'msg'
+      try { tag = (JSON.parse(plain) as { p?: string }).p ?? tag } catch { /* not JSON — pass through */ }
+      this.noteFrame(from, 'call', true, tag)
       return plain
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)
