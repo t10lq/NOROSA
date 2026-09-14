@@ -175,6 +175,10 @@ export class MediaCallClient {
   private attachedReceivers = new WeakSet<RTCRtpReceiver>()
   /** Monotonic pc serial for PeerEntry.pcId (telemetry: rebuild churn detect). */
   private pcSerial = 0
+  /** Senders born through pc.addTrack(track, stream) — the WebKit-OFFERER-safe
+   *  path (SSRC steering in the offer). A transceiver-born sender is fine to
+   *  ANSWER with, but must never be the one building an iOS offer. */
+  private addTrackSenders = new WeakSet<RTCRtpSender>()
   /** Per-peer count of offerer-send-stuck rebuild kicks + the pcId each kick
    *  consumed. Safari OFFERERS repeatedly ship a green transceiver (sendrecv,
    *  live mic, transform attached) that never emits more than a packet or two;
@@ -653,9 +657,27 @@ this.closePeer(alias, 'presence-offline')
     this.peers.set(peer, entry)
 
     // M-lines BEFORE any await (see method doc — adding them late mangles the
-    // SDP map and turns calls half-open).
-    const aT = pc.addTransceiver('audio', { direction: 'sendrecv' })
-    entry.audioSender = aT.sender
+    // SDP map and turns calls half-open). ROOT-CAUSE wiring for iOS-OFFERER
+    // audio: WebKit only steers an offer-side sender's SSRC when the track is
+    // bound through the CLASSIC `pc.addTrack(track, stream)` path (it mints a
+    // proper msid line in the offer). A bare `addTransceiver('audio',
+    // {direction:'sendrecv'})` + later `replaceTrack(mic)` yields a transceiver
+    // that LOOKS green on iOS — currentDirection sendrecv, track live, SDP
+    // sendrecv — yet never emits an RTP packet as the OFFERER (the very panel
+    // shape: ↑0/1 with everything green, but the same device streams 5k+
+    // packets the moment it ANSWERS). So: mic already live → addTrack; not yet
+    // granted → addTransceiver and let the track drop in via replaceTrack (the
+    // ANSWER path, where WebKit binds senders correctly regardless).
+    const localStream = this.micTrack && this.micTrack.readyState === 'live' ? new MediaStream([this.micTrack]) : new MediaStream()
+    if (this.micTrack?.readyState === 'live' && this.audioEnabled) {
+      const sender = pc.addTrack(this.micTrack, localStream)
+      entry.audioSender = sender
+      this.addTrackSenders.add(sender)
+      dbg('peer pc mic-bound via addTrack', { peer, transceivers: pc.getTransceivers().length })
+    } else {
+      const aT = pc.addTransceiver('audio', { direction: 'sendrecv' })
+      entry.audioSender = aT.sender
+    }
     // Sanity: exactly one transceiver leaves here. A larger count means a
     // stray addTransceiver or a duplicated ensurePeer — the tell for mystery
     // receiver accumulation on the far side.
@@ -664,10 +686,11 @@ this.closePeer(alias, 'presence-offline')
     // LEGACY model: encoded streams MUST exist synchronously at negotiation;
     // Chromium throws "Too late to create encoded streams" once RTP is flowing.
     // MODERN model: sender.transform assignment works anytime — skip.
+    const audioSender = entry.audioSender
     if (this.e2eeSupported && encodedTransformModel() === 'legacy') {
       try {
-        const s = (aT.sender as unknown as EncodedStreamHost).createEncodedStreams()
-        senderStreamCache.set(aT.sender, s)
+        const s = (audioSender as unknown as EncodedStreamHost).createEncodedStreams()
+        senderStreamCache.set(audioSender, s)
       } catch {
         /* negotiated later; attachSend will surface it */
       }
@@ -811,6 +834,19 @@ this.closePeer(alias, 'presence-offline')
    *  excluded by the signalingState + offerInFlight gate. */
   private async createAndSendOffer(peer: string, entry: PeerEntry): Promise<boolean> {
     if (entry.pc.signalingState !== 'stable' || entry.offerInFlight) return false
+    // OFFERER rearm: a transceiver-born sender (mic was still pending when the
+    // pc was built) cannot legally build an iOS offer — WebKit won't steer the
+    // SSRC. If the mic is live NOW, rebuild so ensurePeer re-creates the sender
+    // through addTrack BEFORE any SDP exists. Converges after one rebuild (the
+    // new sender is addTrack-born). Answerers never hit this — WebKit binds
+    // answer-side senders fine.
+    if (this.micTrack?.readyState === 'live' && this.audioEnabled && entry.audioSender && !this.addTrackSenders.has(entry.audioSender)) {
+      console.warn('[media] mic arrived after a transceiver-born sender — rearm via addTrack', { peer })
+      this.logAction('mic-arrived rearm → redial (addTrack sender)', peer)
+      this.closePeer(peer, 'mic-arrived-rearm', true)
+      setTimeout(() => void this.connectTo(peer), 100)
+      return false
+    }
     entry.offerInFlight = true
     try {
       // Same m-line pinning as the answer path: a trackless sender at offer
