@@ -409,11 +409,11 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
             <b style={{ color: '#C9C9D4', letterSpacing: '0.06em' }}>MEDIA LIVE</b>
             <button onClick={() => setDiagOpen(false)} style={{ background: 'none', border: 'none', color: '#6E6E77', cursor: 'pointer', fontFamily: "'Space Mono'", fontSize: 10 }}>✕</button>
           </div>
-          <div style={{ opacity: 0.55 }}>ME · {calls.micOn ? 'mic ON' : 'mic OFF'}{calls.micBlocked ? ' (BLOCKED)' : ''} · {calls.supported ? 'E2EE-capable' : 'DTLS-SRTP-only'} · {calls.cryptoMode.toUpperCase()}</div>
+          <div style={{ opacity: 0.55 }}>ME {selfName} · ROOM {roomCode} · {calls.micOn ? 'mic ON' : 'mic OFF'}{calls.micBlocked ? ' (BLOCKED)' : ''} · {calls.supported ? 'E2EE-capable' : 'DTLS-SRTP-only'} · {calls.cryptoMode.toUpperCase()}</div>
           {[...calls.peerStats.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([peer, s]) => (
             <div key={peer} style={{ whiteSpace: 'nowrap' }}>
-              <span style={{ color: '#D7D7E0' }}>{peer.slice(0, 6)}</span>
-              <span> {s.conn === 'connected' ? 'CONN' : s.conn.toUpperCase()} </span>
+              <span style={{ color: '#D7D7E0' }}>{peer.slice(0, 10)}</span>
+              <span> {s.conn === 'connected' ? 'CONN' : s.conn.toUpperCase()} {s.sig.slice(0, 4)}</span>
               <span style={{ color: s.dir === 'sendrecv' ? '#7BD88F' : '#E5A24A' }}>{s.dir === 'sendrecv' ? 'SD' : (s.dir || '?').toUpperCase()}/{s.rdir === 'sendrecv' ? 'SD' : (s.rdir || '?').toUpperCase()}</span>
               <span> ↑{s.packetsSent} · ↓{s.packetsReceived}</span>
               <span style={{ color: s.hasMic ? '#7BD88F' : '#8B8B96' }}>{s.hasMic ? ' M+' : ' M-'}</span>

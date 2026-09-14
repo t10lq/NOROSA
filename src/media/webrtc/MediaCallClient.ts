@@ -58,6 +58,8 @@ export interface MediaCallEvents {
 
 export interface PeerMediaStats {
   conn: RTCPeerConnectionState
+  /** Where the pair's SDP exchange sits (new / have-local-offer / stable …). */
+  sig: string
   /** Audio m-line direction as reported in OUR local SDP (ground truth that
    *  survives engines without sender.transceiver). */
   dir: string
@@ -192,6 +194,7 @@ export class MediaCallClient {
       const rx = entry.pc.getReceivers().find(r => r.track?.kind === 'audio')
       const base: PeerMediaStats = {
         conn: entry.pc.connectionState,
+        sig: entry.pc.signalingState,
         dir: sdpAudioDir(entry.pc.localDescription?.sdp),
         rdir: sdpAudioDir(entry.pc.remoteDescription?.sdp),
         hasMic: this.micTrack?.readyState === 'live' && !!this.audioEnabled,
