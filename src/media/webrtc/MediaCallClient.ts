@@ -71,6 +71,15 @@ export interface PeerMediaStats {
   /** Local audio receiver carries the decrypt transform. */
   rxAttached: boolean
   decryptFailing: boolean
+  /** How many transceivers carry an audio kind (a mid-quirk leaves our sender
+   *  on an ORPHAN transceiver while Chrome negotiates a sendrecv SDP for a
+   *  trackless one — SDP says sendrecv yet ↑ stays 0: the count exposes it). */
+  aTr: number
+  /** currentDirection of the transceiver owning entry.audioSender — the ONLY
+   *  ground truth for whether OUR track is actually on the sending m-line. */
+  trDir: string | null
+  /** readyState of the track the audio sender carries ('none' when trackless). */
+  sLive: string | null
   ts: number
   packetsSent: number
   packetsReceived: number
@@ -208,6 +217,8 @@ export class MediaCallClient {
     for (const [peer, entry] of this.peers) {
       const sender = entry.audioSender
       const rx = entry.pc.getReceivers().find(r => r.track?.kind === 'audio')
+      const aTrs = entry.pc.getTransceivers().filter(tr => tr.receiver.track?.kind === 'audio' || tr.sender.track?.kind === 'audio')
+      const trDir = sender ? (transceiverOf(sender)?.currentDirection ?? null) : null
       const base: PeerMediaStats = {
         conn: entry.pc.connectionState,
         sig: entry.pc.signalingState,
@@ -217,6 +228,9 @@ export class MediaCallClient {
         txAttached: !!sender && entry.encAttach.has(sender),
         rxAttached: !!rx && this.attachedReceivers.has(rx),
         decryptFailing: this.decryptFailing.has(peer),
+        aTr: aTrs.length,
+        trDir,
+        sLive: sender?.track?.readyState ?? null,
         ts: Date.now(),
         packetsSent: 0,
         packetsReceived: 0,
@@ -264,11 +278,21 @@ this.closePeer(alias, 'presence-offline')
       // already-negotiated sendrecv line the track just drops in via
       // replaceTrack, no renegotiation needed.
       if (this.micTrack?.readyState === 'live' && this.audioEnabled) {
-        const senderLive = [...entry.pc.getTransceivers()].some(tr =>
-          (tr.receiver.track.kind === 'audio' || tr.sender.track?.kind === 'audio') && tr.sender.track?.readyState === 'live',
-        )
-        if (!senderLive && this.attachMicToActiveSender(entry)) {
-          dbg('tick heal: mic re-attached to active sender', { peer: alias })
+        // UNCONDITIONAL: replaceTrack is idempotent, and the old guard
+        // (`some transceiver with a live sender track`) could be satisfied by
+        // a live track on an ORPHAN transceiver while the negotiated one stays
+        // empty — ↑0 forever with a "healthy" panel. Always sweep.
+        this.attachMicToActiveSender(entry)
+        // The sender's OWN transceiver must be negotiated send-capable. SDP
+        // can SAY sendrecv while the real sender sits on a transceiver Chrome
+        // answered recvonly — replaceTrack can't un-negotiate that: rebuild.
+        const trDir = entry.audioSender ? transceiverOf(entry.audioSender)?.currentDirection ?? null : null
+        if (trDir && !trDir.includes('send')) {
+          console.warn('[media] audio sender transceiver not send-capable (' + trDir + ') — rebuilding pair', { peer: alias })
+          dbg('tick heal: sender-transceiver-not-send', { peer: alias, trDir })
+          this.closePeer(alias, 'sender-tr-not-send', true)
+          setTimeout(() => void this.connectTo(alias), 500)
+          continue
         }
       }
       // Rebuild the pair when a live mic never made it onto the negotiated
@@ -400,7 +424,15 @@ this.closePeer(alias, 'presence-offline')
     const live = this.micTrack?.readyState === 'live' ? this.micTrack : null
     if (!live) return false
     let touched = false
-    for (const tr of entry.pc.getTransceivers()) {
+    const trs = entry.pc.getTransceivers()
+    // Prefer the transceiver the negotiation actually leaves send-capable; on
+    // a mid-quirk the audio-receiver check alone matches a shadow transceiver.
+    const ordered = [...trs].sort((a, b) => {
+      const aSend = (a.currentDirection ?? '').includes('send') ? 1 : 0
+      const bSend = (b.currentDirection ?? '').includes('send') ? 1 : 0
+      return bSend - aSend
+    })
+    for (const tr of ordered) {
       const audio = tr.receiver.track.kind === 'audio' || tr.sender.track?.kind === 'audio'
       if (!audio) continue
       if (tr.direction !== 'sendrecv') tr.direction = 'sendrecv'

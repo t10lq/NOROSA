@@ -421,9 +421,12 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
               <span style={{ color: s.rxAttached ? '#7BD88F' : '#8B8B96' }}>{s.rxAttached ? ' RX:e2ee' : ' RX:--'}</span>
               {s.decryptFailing && <span style={{ color: '#FF6B5E' }}> DROPS!</span>}
               <span> {s.rttMs != null ? `${s.rttMs}ms` : ''}</span>
+              <span style={{ color: (s.trDir ?? '').includes('send') ? '#7BD88F' : '#E5A24A' }}> tr:{s.trDir ?? '?'}</span>
+              <span style={{ opacity: 0.7 }}> aTr:{s.aTr}</span>
+              <span style={{ opacity: 0.7 }}> mk:{s.sLive ?? 'x'}</span>
             </div>
           ))}
-          <div style={{ opacity: 0.5, marginTop: 4 }}>dir = MY m-line / THEIR m-line · LEFT NOT SD ⇒ I never negotiated send (↑ stays 0) · bottom-left: ↑=0 and LI/RI not SD</div>
+          <div style={{ opacity: 0.5, marginTop: 4 }}>dir = MY m-line / THEIR m-line · SD/MY+THEIR · tr = sender transceiver direction (must include 'send' or ↑ stays 0) · aTr = audio transceiver count · mk = mic readyState on sender</div>
           <div style={{ opacity: 0.75, marginTop: 3, borderTop: '1px solid rgba(255,255,255,0.10)', paddingTop: 3 }}>
             {calls.actionLog.map((n, i) => (
               <div key={i} style={{ color: n.includes('fail') || n.includes('dup') ? '#ff8a8a' : '#ffd98a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{n}</div>
