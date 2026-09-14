@@ -414,7 +414,7 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
             <div key={peer} style={{ whiteSpace: 'nowrap' }}>
               <span style={{ color: '#D7D7E0' }}>{peer.slice(0, 6)}</span>
               <span> {s.conn === 'connected' ? 'CONN' : s.conn.toUpperCase()} </span>
-              <span style={{ color: s.dir === 'sendrecv' ? '#7BD88F' : '#E5A24A' }}>{s.dir === 'sendrecv' ? 'SD' : s.dir ? s.dir.slice(0, 4).toUpperCase() : '?'}</span>
+              <span style={{ color: s.dir === 'sendrecv' ? '#7BD88F' : '#E5A24A' }}>{s.dir === 'sendrecv' ? 'SD' : (s.dir || '?').toUpperCase()}/{s.rdir === 'sendrecv' ? 'SD' : (s.rdir || '?').toUpperCase()}</span>
               <span> ↑{s.packetsSent} · ↓{s.packetsReceived}</span>
               <span style={{ color: s.hasMic ? '#7BD88F' : '#8B8B96' }}>{s.hasMic ? ' M+' : ' M-'}</span>
               <span style={{ color: s.txAttached ? '#7BD88F' : '#8B8B96' }}>{s.txAttached ? ' TX:e2ee' : ' TX:--'}</span>
@@ -423,7 +423,7 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
               <span> {s.rttMs != null ? `${s.rttMs}ms` : ''}</span>
             </div>
           ))}
-          <div style={{ opacity: 0.5, marginTop: 4 }}>on a silent device: ↓ stays 0 ⇒ nothing arriving · its ↑=0 ⇒ it never negotiated send (SD off)</div>
+          <div style={{ opacity: 0.5, marginTop: 4 }}>dir = MY m-line / THEIR m-line · LEFT NOT SD ⇒ I never negotiated send (↑ stays 0) · bottom-left: ↑=0 and LI/RI not SD</div>
         </div>
       )}
 

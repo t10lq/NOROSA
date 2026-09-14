@@ -58,7 +58,11 @@ export interface MediaCallEvents {
 
 export interface PeerMediaStats {
   conn: RTCPeerConnectionState
-  dir: RTCRtpTransceiverDirection | ''
+  /** Audio m-line direction as reported in OUR local SDP (ground truth that
+   *  survives engines without sender.transceiver). */
+  dir: string
+  /** Audio m-line direction as reported in the peer's SDP. */
+  rdir: string
   hasMic: boolean
   /** Local audio sender carries the encrypt transform. */
   txAttached: boolean
@@ -87,6 +91,22 @@ const u8z = (): Uint8Array<ArrayBuffer> => new Uint8Array(0) as Uint8Array<Array
 const transceiverOf = (sender: RTCRtpSender | null): RTCRtpTransceiver | null => {
   if (!sender) return null
   return (sender as unknown as { transceiver?: RTCRtpTransceiver }).transceiver ?? null
+}
+
+/** Direction of the `m=audio` section in an SDP, or `?` when absent. Unlike
+ *  `transceiver.direction`, this IS the negotiated ground truth — Safari (and
+ *  the PC browsers here) all report the direction column faithfully. */
+function sdpAudioDir(sdp: string | undefined): string {
+  if (!sdp) return '?'
+  const lines = sdp.split('\r\n').filter(Boolean)
+  const mAudio = lines.findIndex(l => l.startsWith('m=audio'))
+  if (mAudio < 0) return '?'
+  for (let i = mAudio + 1; i < lines.length; i++) {
+    const l = lines[i]
+    if (l.startsWith('m=')) break
+    if (/^a=(sendrecv|recvonly|sendonly|inactive)$/.test(l)) return l.slice(2)
+  }
+  return '?'
 }
 
 // ── The call client ───────────────────────────────────────────────
@@ -172,7 +192,8 @@ export class MediaCallClient {
       const rx = entry.pc.getReceivers().find(r => r.track?.kind === 'audio')
       const base: PeerMediaStats = {
         conn: entry.pc.connectionState,
-        dir: transceiverOf(sender)?.direction ?? '',
+        dir: sdpAudioDir(entry.pc.localDescription?.sdp),
+        rdir: sdpAudioDir(entry.pc.remoteDescription?.sdp),
         hasMic: this.micTrack?.readyState === 'live' && !!this.audioEnabled,
         txAttached: !!sender && entry.encAttach.has(sender),
         rxAttached: !!rx && this.attachedReceivers.has(rx),
@@ -217,6 +238,18 @@ this.closePeer(alias, 'presence-offline')
     await this.reconcile()
     for (const [alias, entry] of this.peers) {
       if (entry.pc.connectionState !== 'connected') continue
+      // Rebuild the pair when a live mic never made it onto the negotiated
+      // m-line (Safari answers recvonly for a trackless sender; the mic often
+      // grants right AFTER the answer). The rebuild re-answers with the mic
+      // present → sendrecv, and the remote rebuilds alongside (bye).
+      const ld = sdpAudioDir(entry.pc.localDescription?.sdp)
+      if (this.micTrack?.readyState === 'live' && this.audioEnabled && ld !== 'sendrecv') {
+        console.warn('[media] audio m-line not sendrecv with a live mic — renegotiating', { peer: alias, dir: ld })
+        dbg('tick heal: audio m-line renegotiation', { peer: alias, dir: ld })
+        this.closePeer(alias, 'audio-line-not-send', true)
+        setTimeout(() => void this.connectTo(alias), 500)
+        continue
+      }
       if (entry.e2ee) {
         // Sender transform missing + a live mic = we send this peer PLAIN
         // frames while they decrypt → their silence. Re-attach when the
@@ -605,7 +638,20 @@ this.closePeer(alias, 'presence-offline')
             dbg('audio m-line pinned sendrecv on answer', { peer: from, was })
           }
         }
-        dbg('answered offer', { from, receiversAfter: entry.pc.getReceivers().length, audioDirection: transceiverOf(entry.audioSender)?.direction, audioHasTrack: !!entry.audioSender?.track, mLines: entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0 })
+        // Safari derives the answer's direction from the track attached AT
+        // answer time — the direction property alone does not override a
+        // trackless sender. The peer's offer usually lands while the mic is
+        // still in the OS permission prompt, so hold the reply until the
+        // background ensureMic (already in flight via prepareMedia → salts)
+        // either grants us a track or gives up, then answer with the mic
+        // actually on the sender. Cap at 2.5s so a permanently-pending device
+        // prompt never stalls negotiation — the track still lands later via
+        // replaceTrack, but audio then needs a renegotiation to transport.
+        await Promise.race([
+          entry.salts,
+          new Promise<void>(res => setTimeout(res, 2500)),
+        ]).catch(() => {})
+        dbg('answering offer', { from, audioDirection: sdpAudioDir(entry.pc.localDescription?.sdp), audioHasTrack: !!entry.audioSender?.track, micTrackLive: this.micTrack?.readyState === 'live' })
         await entry.pc.setLocalDescription(await entry.pc.createAnswer())
         this.svc.sendCallSignal(from, JSON.stringify({ p: 'answer', d: entry.pc.localDescription!.sdp, e: this.e2eeSupported }))
         await this.flushIce(entry)
