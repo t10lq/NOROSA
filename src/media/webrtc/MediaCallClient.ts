@@ -257,6 +257,20 @@ this.closePeer(alias, 'presence-offline')
     await this.reconcile()
     for (const [alias, entry] of this.peers) {
       if (entry.pc.connectionState !== 'connected') continue
+      // A connected pair whose FINAL pc lost its mic track (fresh sender after
+      // a re-dial, replaceTrack only ever aimed at a now-dead pc) sends RTP on
+      // an empty sender — the panel shows exactly this: SD/SD, TX:e2ee, but
+      // ↑0 for the whole session. Re-attach the live mic now: for an
+      // already-negotiated sendrecv line the track just drops in via
+      // replaceTrack, no renegotiation needed.
+      if (this.micTrack?.readyState === 'live' && this.audioEnabled) {
+        const senderLive = [...entry.pc.getTransceivers()].some(tr =>
+          (tr.receiver.track.kind === 'audio' || tr.sender.track?.kind === 'audio') && tr.sender.track?.readyState === 'live',
+        )
+        if (!senderLive && this.attachMicToActiveSender(entry)) {
+          dbg('tick heal: mic re-attached to active sender', { peer: alias })
+        }
+      }
       // Rebuild the pair when a live mic never made it onto the negotiated
       // m-line (Safari answers recvonly for a trackless sender; the mic often
       // grants right AFTER the answer). The rebuild re-answers with the mic
@@ -373,6 +387,29 @@ this.closePeer(alias, 'presence-offline')
     } catch {
       return false
     }
+  }
+
+  /** Attach the live mic to whichever transceiver actually carries the pair's
+ *  audio — the OFFERED m-line binds to an audio-RECEIVER transceiver, which
+ *  mid-mismatch/shadow transceivers can leave distinct from entry.audioSender.
+ *  Setting sendrecv + the track on the ACTIVE one means a connected pair whose
+ *  final pc lost its track (fresh sender after the last re-dial) starts
+ *  sending without any renegotiation. Returns true if any audio transceiver
+ *  was visited. */
+  private attachMicToActiveSender(entry: PeerEntry): boolean {
+    const live = this.micTrack?.readyState === 'live' ? this.micTrack : null
+    if (!live) return false
+    let touched = false
+    for (const tr of entry.pc.getTransceivers()) {
+      const audio = tr.receiver.track.kind === 'audio' || tr.sender.track?.kind === 'audio'
+      if (!audio) continue
+      if (tr.direction !== 'sendrecv') tr.direction = 'sendrecv'
+      if (tr.sender.track !== live) {
+        try { tr.sender.replaceTrack(live) } catch { /* sender frozen mid-renego */ }
+      }
+      touched = true
+    }
+    return touched
   }
 
   /** Some webcam drivers leave getUserMedia pending forever (hanging device).
@@ -619,6 +656,7 @@ this.closePeer(alias, 'presence-offline')
         // Same hazard as the answer path: the offer must carry a live sender
         // track or Chrome can bake recvonly into it too. Force the mic here.
         await this.ensureSenderTrack(entry, peer)
+        this.attachMicToActiveSender(entry)
         await entry.pc.setLocalDescription(await entry.pc.createOffer())
         // Same sanity as the answer path: an offer that drops our audio send
         // direction while the mic is live is never shipped — rebuild the pair
@@ -752,12 +790,7 @@ await Promise.race([
         // orphan transceiver, and Chrome then answers recvonly with a live mic
         // in hand, as the panel kept proving). Sweep every transceiver: the
         // audio-receiver's one becomes sendrecv and takes our live track.
-        for (const tr of entry.pc.getTransceivers()) {
-          if (tr.receiver.track.kind !== 'audio' && tr.sender.track?.kind !== 'audio') continue
-          if (tr.direction !== 'sendrecv') tr.direction = 'sendrecv'
-          const live = this.micTrack?.readyState === 'live' ? this.micTrack : (entry.audioSender?.track as MediaStreamTrack | null)
-          if (live && live.readyState === 'live' && tr.sender.track !== live) tr.sender.replaceTrack(live)
-        }
+        this.attachMicToActiveSender(entry)
         dbg('answering offer', { from, audioDirection: sdpAudioDir(entry.pc.localDescription?.sdp), audioHasTrack: !!entry.audioSender?.track, micTrackLive: this.micTrack?.readyState === 'live' })
         await entry.pc.setLocalDescription(await entry.pc.createAnswer())
         // Safari can still answer recvonly for the audio m-line despite a
