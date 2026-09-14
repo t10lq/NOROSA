@@ -725,8 +725,8 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
    */
   onCall(cb: (from: string, payload: string) => void): void {
     this.onCallFrame = cb
-    this.relay.onCall((from, raw) => {
-      void this.handleCallIncoming(from, raw).then(payload => {
+    this.relay.onCall((from, raw, id) => {
+      void this.handleCallIncoming(from, raw, id).then(payload => {
         if (payload) this.onCallFrame(from, payload)
       })
     })
@@ -851,7 +851,7 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
   }
 
   /** Decrypt one media-plane call frame then hand it to the subscriber. */
-  private async handleCallIncoming(from: string, raw: string): Promise<string> {
+  private async handleCallIncoming(from: string, raw: string, id?: string): Promise<string> {
     let env: Envelope
     try {
       env = JSON.parse(raw) as Envelope
@@ -870,7 +870,12 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
       }
       let tag = 'msg'
       try { tag = (JSON.parse(plain) as { p?: string }).p ?? tag } catch { /* not JSON — pass through */ }
-      this.noteFrame(from, 'call', true, tag)
+      // The envelope's OWN target (`o`) says who the frame was dialled to — a
+      // frame stamped from=myself whose o equals the PEER means the relay
+      // handed us a wire meant for someone else (routing/mailbox bug); o=myself
+      // means we dialed ourselves (client bug). The wire id catches replays.
+      const o = env.o?.slice(0, 6) ?? '?'
+      this.noteFrame(from, 'call', true, `${tag}→${o}${id ? '#' + id.slice(0, 4) : ''}`)
       return plain
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err)

@@ -26,7 +26,7 @@ export class RelayLink {
   private pendingTxn = new Map<string, (res: WireKeysResult) => void>()
   private queues: (WireMsg | WireCall | WireUpload)[] = []
   private onIncoming: (from: string, payload: string) => void = () => {}
-  private onCallIncoming: (from: string, payload: string) => void = () => {}
+  private onCallIncoming: (from: string, payload: string, id: string) => void = () => {}
   private onPresenceChange: (alias: string, online: boolean) => void = () => {}
   private onStateChange: (open: boolean) => void = () => {}
   private reconnectDelay = 300
@@ -122,9 +122,11 @@ export class RelayLink {
         // Duplicate-delivery sentinel at the TRANSPORT seam: the sender stamps
         // a fresh UUID per sendCall(). Same id here twice ⇒ the relay/mailbox
         // delivered one wire twice (transport bug). Two DIFFERENT ids ⇒ the
-        // offerer really sent two wires (client bug further up).
+        // offerer really sent two wires (client bug further up). Passed through
+        // to the diagnostics so a self-echo line can say whether the target
+        // alias matched the wire or not.
         dbg('wire.call rx', { id: wire.id, from: wire.from, len: wire.payload.length })
-        this.onCallIncoming(wire.from, wire.payload)
+        this.onCallIncoming(wire.from, wire.payload, wire.id)
         break
       }
       case 'presence': {
@@ -174,7 +176,7 @@ private send(out: WireOut): void {
   }
 
   /** Media-plane signaling frames (SDP / ICE), never parsed by the transport. */
-  onCall(cb: (from: string, payload: string) => void): void {
+  onCall(cb: (from: string, payload: string, id: string) => void): void {
     this.onCallIncoming = cb
   }
 
