@@ -634,14 +634,17 @@ this.closePeer(alias, 'presence-offline')
     } catch {
       return
     }
+    this.logAction(`${sig.p} from=${from.slice(0, 12)} /me=${this.svc.selfAlias?.slice(0, 8)}`, from)
 
     if (sig.p === 'offer') {
       // We are the ANSWERER. ensurePeer() arms the connection synchronously —
       // PC, audio+video transceivers, wiring — so the received offer maps onto
       // existing m-lines and we answer immediately. No dependency on the media
       // key here: that only gates the (background) crypto attachment.
+      const existed = this.peers.has(from)
       const entry = this.ensurePeer(from)
       if (!entry) return
+      this.logAction(`offer ${existed ? 'reuse' : 'fresh'} from ${from}`, from)
       // Pair-effective mode: E2EE only when BOTH ends carry the transform
       // layer. The answer echoes our own capability so the offerer converges.
       entry.e2ee = this.e2eeSupported && (sig.e ?? this.e2eeSupported)
@@ -720,6 +723,7 @@ this.closePeer(alias, 'presence-offline')
         // recvonly — that sender has nothing to send by definition.
         if (answeredDir !== 'sendrecv' && (this.micTrack?.readyState === 'live' || !this.micDenied)) {
           console.warn(`[media] answer came back ${answeredDir} with a live mic — re-negotiating`, { peer: from })
+          this.logAction(`answer=${answeredDir} mic=${this.micTrack?.readyState ?? 'none'} denied=${this.micDenied}`, from)
           dbg('answer-not-sendrecv: immediate re-negotiation', { peer: from, dir: answeredDir })
           this.closePeer(from, 'answer-not-sendrecv', true)
           setTimeout(() => void this.connectTo(from), 300)
