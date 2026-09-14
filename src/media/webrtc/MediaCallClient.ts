@@ -96,6 +96,9 @@ type CallSig =
   | { p: 'mute'; on: boolean }
   /** Explicit teardown notice — the sender closed its local peer connection. */
   | { p: 'bye' }
+  /** Stuck-OFFERER flip request: "my send pipeline is dead as offerer — you
+   *  (re)offer so I answer". The re-answer path demonstrably sends on iOS. */
+  | { p: 'reoffer' }
 
 /** Empty-slot placeholder for legacy pairs (no transform layer uses it). */
 const u8z = (): Uint8Array<ArrayBuffer> => new Uint8Array(0) as Uint8Array<ArrayBuffer>
@@ -179,6 +182,9 @@ export class MediaCallClient {
    *  one per pc, two total for the session. */
   private offerKicks = new Map<string, number>()
   private kickedPc = new Map<string, number>()
+  /** Peers that already flipped the negotiation once (offer↔answer swap) as
+   *  the Ph2 of a stuck-OFFERER — never repeated, or the pair would glare. */
+  private reoffered = new Set<string>()
   /** Peers whose inbound frames are actively failing to decrypt. */
   private decryptFailing = new Set<string>()
   private healing = new Set<string>()
@@ -408,15 +414,36 @@ this.closePeer(alias, 'presence-offline')
       if (this.micTrack?.readyState === 'live' && this.audioEnabled &&
           ld.includes('send') && sdpAudioDir(entry.pc.remoteDescription?.sdp).includes('send')) {
         const outbound = await audioOutboundPackets(entry.pc)
-        if (outbound <= 1 && (this.offerKicks.get(alias) ?? 0) < 2 && this.kickedPc.get(alias) !== entry.pcId) {
-          const kicks = (this.offerKicks.get(alias) ?? 0) + 1
-          this.offerKicks.set(alias, kicks)
-          this.kickedPc.set(alias, entry.pcId)
-          console.warn(`[media] offerer send-stuck (out=${outbound}) — kick ${kicks}/2, redial`, { peer: alias })
-          this.logAction(`offerer-send-stuck kick ${kicks}/2 → redial`, alias)
-          this.closePeer(alias, 'offerer-send-stuck', true)
-          setTimeout(() => void this.connectTo(alias), 700)
-          continue
+        if (outbound <= 1) {
+          const kicks = this.offerKicks.get(alias) ?? 0
+          if (kicks < 2 && this.kickedPc.get(alias) !== entry.pcId) {
+            // Ph1: rebuild once per pc — a fresh pc re-arms the pipeline.
+            this.offerKicks.set(alias, kicks + 1)
+            this.kickedPc.set(alias, entry.pcId)
+            console.warn(`[media] offerer send-stuck (out=${outbound}) — kick ${kicks + 1}/2, redial`, { peer: alias })
+            this.logAction(`offerer-send-stuck kick ${kicks + 1}/2 → redial`, alias)
+            this.closePeer(alias, 'offerer-send-stuck', true)
+            setTimeout(() => void this.connectTo(alias), 700)
+            continue
+          }
+          // Ph2 (kicks exhausted, still silent): the rebuild didn't help —
+          // flip the NEGOTIATION so the stuck side ANSWERS. If we are the
+          // offerer, ask the far side to re-offer ('reoffer' → they offer →
+          // we answer). If we are the answerer, offer ourselves. Both paths
+          // turn the silent device into the answerer — the role where iOS
+          // has been proven to stream 5k+ packets. Once per peer, ever.
+          if (!this.reoffered.has(alias)) {
+            this.reoffered.add(alias)
+            if (this.svc.amOfferer(alias)) {
+              this.logAction('stuck offerer → request reoffer (flip roles)', alias)
+              console.warn('[media] stuck offerer — asking the answerer to re-offer', { peer: alias })
+              this.svc.sendCallSignal(alias, JSON.stringify({ p: 'reoffer' }))
+            } else {
+              this.logAction('stuck answerer → re-offering ourselves (flip roles)', alias)
+              console.warn('[media] stuck answerer — offering ourselves', { peer: alias })
+              await this.createAndSendOffer(alias, entry)
+            }
+          }
         }
       }
     }
@@ -769,39 +796,54 @@ this.closePeer(alias, 'presence-offline')
       if (entry.offerInFlight) {
         console.warn('[media] negotiation-start blocked (offer already in flight)', { peer })
       } else {
-        entry.offerInFlight = true
-        // Same m-line pinning as the answer path: a trackless sender at offer
-        // time (mic still in the prompt / denied) must NOT collapse the audio
-        // line to recvonly — the track arrives via replaceTrack later.
-        const audioTr = transceiverOf(entry.audioSender)
-        if (audioTr && audioTr.direction !== 'sendrecv') audioTr.direction = 'sendrecv'
-        // Same hazard as the answer path: the offer must carry a live sender
-        // track or Chrome can bake recvonly into it too. Force the mic here.
-        await this.ensureSenderTrack(entry, peer)
-        this.attachMicToActiveSender(entry)
-        await entry.pc.setLocalDescription(await entry.pc.createOffer())
-        // Same sanity as the answer path: an offer that drops our audio send
-        // direction while the mic is live is never shipped — rebuild the pair
-        // so the retry carries the track from the first SDP line.
-        const offeredDir = sdpAudioDir(entry.pc.localDescription?.sdp)
-        if (offeredDir !== 'sendrecv' && this.micTrack?.readyState === 'live') {
-          console.warn(`[media] offer came back ${offeredDir} with a live mic — re-negotiating`, { peer })
-          dbg('offer-not-sendrecv: immediate re-negotiation', { peer, dir: offeredDir })
-          this.closePeer(peer, 'offer-not-sendrecv', true)
-          setTimeout(() => void this.connectTo(peer), 300)
-          // The pair is being torn down; these placeholders are never used.
-          return { key: u8z(), send: u8z(), recv: u8z() }
-        }
-        const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
-        const skel = entry.pc.localDescription?.sdp.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
-        dbg('sent offer', { peer, mLines: ml, mids: skel, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
-        this.svc.sendCallSignal(peer, JSON.stringify({ p: 'offer', d: entry.pc.localDescription!.sdp, e: this.e2eeSupported }))
-        // Offer is out — future renegotiation is the caller's business now.
-        entry.offerInFlight = false
+        await this.createAndSendOffer(peer, entry)
       }
     }
     // ANSWERER: nothing here — answering happens inside handleSignal('offer').
     return { key, send, recv }
+  }
+
+  /** Build a LOCAL offer on an established pair and ship it as p:'offer'.
+   *  Used by the DETERMINISTIC offerer at dial time, and by either side when
+   *  a stuck-OFFERER re-flips the negotiation ('reoffer'): the receiver of a
+   *  fresh offer becomes the ANSWERER — a role in which the (iOS) device that
+   *  cannot send as offerer has been proven to stream 5k+ packets. Glare is
+   *  excluded by the signalingState + offerInFlight gate. */
+  private async createAndSendOffer(peer: string, entry: PeerEntry): Promise<boolean> {
+    if (entry.pc.signalingState !== 'stable' || entry.offerInFlight) return false
+    entry.offerInFlight = true
+    try {
+      // Same m-line pinning as the answer path: a trackless sender at offer
+      // time (mic still in the prompt / denied) must NOT collapse the audio
+      // line to recvonly — the track arrives via replaceTrack later.
+      const audioTr = transceiverOf(entry.audioSender)
+      if (audioTr && audioTr.direction !== 'sendrecv') audioTr.direction = 'sendrecv'
+      // Same hazard as the answer path: the offer must carry a live sender
+      // track or Chrome can bake recvonly into it too. Force the mic here.
+      await this.ensureSenderTrack(entry, peer)
+      this.attachMicToActiveSender(entry)
+      await entry.pc.setLocalDescription(await entry.pc.createOffer())
+      // Same sanity as the answer path: an offer that drops our audio send
+      // direction while the mic is live is never shipped — rebuild the pair
+      // so the retry carries the track from the first SDP line.
+      const offeredDir = sdpAudioDir(entry.pc.localDescription?.sdp)
+      if (offeredDir !== 'sendrecv' && this.micTrack?.readyState === 'live') {
+        console.warn(`[media] offer came back ${offeredDir} with a live mic — re-negotiating`, { peer })
+        dbg('offer-not-sendrecv: immediate re-negotiation', { peer, dir: offeredDir })
+        this.closePeer(peer, 'offer-not-sendrecv', true)
+        setTimeout(() => void this.connectTo(peer), 300)
+        return false
+      }
+      const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
+      const skel = entry.pc.localDescription?.sdp.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
+      dbg('sent offer', { peer, mLines: ml, mids: skel, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
+      this.svc.sendCallSignal(peer, JSON.stringify({ p: 'offer', d: entry.pc.localDescription!.sdp, e: this.e2eeSupported }))
+      return true
+    } catch {
+      return false
+    } finally {
+      entry.offerInFlight = false
+    }
   }
 
   private async connectTo(peer: string): Promise<void> {
@@ -989,6 +1031,14 @@ await Promise.race([
       } else {
         await entry.pc.addIceCandidate(sig.c as RTCIceCandidateInit).catch(() => {})
       }
+      return
+    }
+    if (sig.p === 'reoffer') {
+      // Flip-the-negotiation request from a stuck OFFERER (their iOS send
+      // pipeline only works when they answer). WE build the offer on the
+      // established pair; they become the answerer and start streaming.
+      this.logAction('reoffer requested → re-offering', from)
+      await this.createAndSendOffer(from, entry)
       return
     }
   }
