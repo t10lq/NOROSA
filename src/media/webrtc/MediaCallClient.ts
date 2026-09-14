@@ -315,21 +315,26 @@ this.closePeer(alias, 'presence-offline')
       // ↑0 for the whole session. Re-attach the live mic now: for an
       // already-negotiated sendrecv line the track just drops in via
       // replaceTrack, no renegotiation needed.
-      if (this.micTrack?.readyState === 'live' && this.audioEnabled) {
-        // STALE-SENDER resync: a previous pc's sender survives closePeer, so
-        // entry.audioSender can point at an EOL pc while the LIVE pc negotiates
-        // its own audio transceiver — every attach (transform / replaceTrack)
-        // then hits the old sender and the current one silently stays empty:
-        // the exact 'SD/SD, TX:e2ee, mk:live, yet ↑0' panel. Repoint to the
-        // transceiver the CURRENT pc actually negotiated as send-capable.
+      // STALE-SENDER resync (UNCONDITIONAL — the mic guard below must never
+      // gate it, or a mic-request in flight leaves entry.audioSender pointing
+      // at an EOL pc for the whole pause): a previous pc's sender survives
+      // closePeer, so entry.audioSender can point at an EOL pc while the LIVE
+      // pc negotiates its own audio transceiver — every attach (transform /
+      // replaceTrack) then hits the old sender and the current one silently
+      // stays empty: the 'SD/SD, TX:e2ee, mk:live, yet ↑0' panel. Repoint to
+      // the transceiver the CURRENT pc actually negotiated as send-capable.
+      {
         const own = senderTransceiver(entry.pc, entry.audioSender)
         const active = entry.pc.getTransceivers().find(tr =>
           tr.receiver.track?.kind === 'audio' && (tr.currentDirection ?? '').includes('send'),
         ) ?? entry.pc.getTransceivers().find(tr => tr.receiver.track?.kind === 'audio')
-        if (!own && active) {
+        if (!own && active && entry.audioSender !== active.sender) {
           entry.audioSender = active.sender
+          this.logAction('audio sender re-pointed to live transceiver', alias)
           dbg('tick heal: audio sender re-pointed to current pc transceiver', { peer: alias, pcId: entry.pcId })
         }
+      }
+      if (this.micTrack?.readyState === 'live' && this.audioEnabled) {
         // UNCONDITIONAL: replaceTrack is idempotent, and the old guard
         // (`some transceiver with a live sender track`) could be satisfied by
         // a live track on an ORPHAN transceiver while the negotiated one stays
@@ -376,10 +381,16 @@ this.closePeer(alias, 'presence-offline')
       if (entry.e2ee) {
         // Sender transform missing + a live mic = we send this peer PLAIN
         // frames while they decrypt → their silence. Re-attach when the
-        // one-shot 'connected' hook ran before the mic existed.
-        if (this.micTrack?.readyState === 'live' && entry.audioSender && !entry.encAttach.has(entry.audioSender)) {
-          dbg('tick heal: attaching sender crypto', { peer: alias })
-          this.attachSend(alias, entry.audioSender, 'audio', this.micTrack)
+        // one-shot 'connected' hook ran before the mic existed. Sweep EVERY
+        // audio sender on the CURRENT pc (the panel's TX:e2ee only proves the
+        // attached entry.audioSender — an aTr:2/orphan shape can broadcast
+        // from a different sender entirely, plaintext, with the smart one
+        // sitting unused); each sender gets its one-lifetime transform.
+        for (const tr of entry.pc.getTransceivers()) {
+          const audio = tr.receiver.track?.kind === 'audio' || tr.sender.track?.kind === 'audio'
+          if (!audio || !tr.sender || entry.encAttach.has(tr.sender)) continue
+          const t = tr.sender.track?.readyState === 'live' ? tr.sender.track : this.micTrack
+          if (t?.readyState === 'live') this.attachSend(alias, tr.sender, 'audio', t)
         }
         // Receiver decrypt missing for an already-connected pair → their
         // encrypted frames arrive undecrypted (dropped). Idempotent WeakSet.
