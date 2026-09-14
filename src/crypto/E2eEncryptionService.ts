@@ -816,24 +816,19 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
   return p
 }
 
-  /** Stable SALT names for the pair's SFrame transforms. The media key is
-   *  celled by the identity pair — but the send/recv salts were derived from
-   *  the volatile ALIAS. Reconnect any side and its re-dial derives over a NEW
-   *  alias: the phone's send salt (over its stale view of our alias) stops
-   *  matching our recv salt (over our fresh one) — RTP keeps climbing and the
-   *  decrypt still succeeds schema-wise, so both TX/RX:e2ee show attached, yet
-   *  one side hears silence while the other works. Resolve the peer's
-   *  curve25519 identity (stable across reconnects) and derive over identities
-   *  instead; a short retry only means a normal key fetch racing the bundle. */
+  /** SALT names for the pair's SFrame transforms — CONSTANT, by construction.
+   *  History: salts derived from the volatile alias flipped one direction
+   *  silent on reconnect, then from the curve25519 identity pair flipped it
+   *  STILL another round — any derivation over SOMETHING-EACH-SIDE-RESOLVES
+   *  can resolve asymmetrically (peer bundle cache, alias drift, identity
+   *  fetch racing), and the victim is ALWAYS exactly one direction while RTP,
+   *  transforms and click counters stay green. One shared salt derived from
+   *  the shared media key alone (deriveSalt folds the key in) is symmetric by
+   *  construction: there is nothing left to mis-resolve. Per-direction key
+   *  separation is not needed for a 1:1 audio line that both parties already
+   *  share — the SFrame key-id/ctr nonces keep the AEAD safe either way. */
   async mediaSalts(peerAlias: string): Promise<{ sendName: string; recvName: string }> {
-    let peerId = ''
-    for (let attempt = 0; attempt < 3 && !peerId; attempt++) {
-      try { peerId = await this.identityOf(peerAlias) } catch { await new Promise(r => setTimeout(r, 750)) }
-    }
-    return {
-      sendName: peerId || peerAlias,
-      recvName: this.identityKey || (this.selfAlias ?? ''),
-    }
+    return { sendName: 'norosa-sframe-v1', recvName: 'norosa-sframe-v1' }
   }
 
   /** Best-effort persist of the agreed media key under the STABLE identity
