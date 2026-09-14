@@ -51,6 +51,8 @@ export interface CallContextValue {
   peerStats: ReadonlyMap<string, PeerMediaStats>
   /** Call-wire delivery telemetry (delivered/dropped frames + drop reasons). */
   frameTele: { delivered: ReadonlyMap<string, number>; dropped: ReadonlyMap<string, number>; notes: string[] }
+  /** Local actions ring (closePeer reasons, answer failures) for on-screen. */
+  actionLog: string[]
   toggleMic: () => void
   setMicOn: (on: boolean) => void
   reconfigureDevices: (micId: string | null) => void
@@ -67,6 +69,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [peerStates, setPeerStates] = useState<ReadonlyMap<string, RTCPeerConnectionState>>(new Map())
   const [peerStats, setPeerStats] = useState<ReadonlyMap<string, PeerMediaStats>>(new Map())
   const [frameTele, setFrameTele] = useState<{ delivered: ReadonlyMap<string, number>; dropped: ReadonlyMap<string, number>; notes: string[] }>({ delivered: new Map(), dropped: new Map(), notes: [] })
+  const [actionLog, setActionLog] = useState<string[]>([])
   const [micOn, setMicOnState] = useState(true)
   const [micBlocked, setMicBlocked] = useState(false)
   const [micError, setMicError] = useState<string | null>(null)
@@ -125,6 +128,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
         })
         const tele = service?.mediaTelemetry()
         if (tele) setFrameTele({ delivered: tele.delivered, dropped: tele.dropped, notes: tele.notes })
+        setActionLog(client?.actionLogSnapshot() ?? [])
       },
       onMicError: (message) => {
         setMicBlocked(true)
@@ -159,6 +163,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setPeerStates(new Map())
       setPeerStats(new Map())
       setFrameTele({ delivered: new Map(), dropped: new Map(), notes: [] })
+      setActionLog([])
     }
   }, [service, isReady])
 
@@ -217,6 +222,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       peerStates,
       peerStats,
       frameTele,
+      actionLog,
       micOn,
       micPending,
       micBlocked,
@@ -225,7 +231,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setMicOn,
       reconfigureDevices,
     }),
-    [media, cryptoMode, remoteStreams, peerMics, decryptDrops, peerStates, peerStats, frameTele, micOn, micPending, micBlocked, micError, toggleMic, setMicOn, reconfigureDevices],
+    [media, cryptoMode, remoteStreams, peerMics, decryptDrops, peerStates, peerStats, frameTele, actionLog, micOn, micPending, micBlocked, micError, toggleMic, setMicOn, reconfigureDevices],
   )
 
   return <CallContext.Provider value={value}>{children}</CallContext.Provider>

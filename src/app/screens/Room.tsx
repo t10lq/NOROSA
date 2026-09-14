@@ -425,6 +425,9 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
           ))}
           <div style={{ opacity: 0.5, marginTop: 4 }}>dir = MY m-line / THEIR m-line · LEFT NOT SD ⇒ I never negotiated send (↑ stays 0) · bottom-left: ↑=0 and LI/RI not SD</div>
           <div style={{ opacity: 0.75, marginTop: 3, borderTop: '1px solid rgba(255,255,255,0.10)', paddingTop: 3 }}>
+            {calls.actionLog.map((n, i) => (
+              <div key={i} style={{ color: n.includes('fail') || n.includes('dup') ? '#ff8a8a' : '#ffd98a', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{n}</div>
+            ))}
             {calls.frameTele.notes.map((n, i) => (
               <div key={i} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{n}</div>
             ))}

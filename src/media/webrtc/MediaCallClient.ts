@@ -137,6 +137,18 @@ export class MediaCallClient {
   private decryptFailing = new Set<string>()
   private healing = new Set<string>()
   private healCounts = new Map<string, number>()
+  /** Short ring of local actions (closePeer reasons, answer errors, guard
+   *  drops) surfaced on-screen so the diagnostics bar can say WHY the pair
+   *  tears down — no devtools needed on a phone. */
+  private actionLog: string[] = []
+  private logAction(msg: string, peer?: string): void {
+    const line = `${new Date().toISOString().slice(11, 19)} ${peer ? peer.slice(0, 6) + ' ' : ''}${msg}`
+    this.actionLog.push(line)
+    if (this.actionLog.length > 6) this.actionLog.shift()
+  }
+  actionLogSnapshot(): string[] {
+    return [...this.actionLog]
+  }
 
   constructor(
     private svc: E2eEncryptionService,
@@ -649,11 +661,13 @@ this.closePeer(alias, 'presence-offline')
       // 3→6 receiver jump. Answer the first copy only.
       if (entry.lastOffer === fp) {
         console.warn('[media] duplicate offer dropped', { from, mLines: gotML, fp })
+        this.logAction('dup-offer dropped', from)
         return
       }
       entry.lastOffer = fp
       if (entry.pc.signalingState !== 'stable') {
         // Duplicate/late offer — deterministic offerer means one offer total.
+        this.logAction(`offer while ${entry.pc.signalingState} — dropped`, from)
         return
       }
       try {
@@ -714,7 +728,9 @@ this.closePeer(alias, 'presence-offline')
         this.svc.sendCallSignal(from, JSON.stringify({ p: 'answer', d: entry.pc.localDescription!.sdp, e: this.e2eeSupported }))
         await this.flushIce(entry)
       } catch (err) {
-        console.warn('[media] answer failed:', err instanceof Error ? err.message : err)
+        const reason = err instanceof Error ? err.message : String(err)
+        console.warn('[media] answer failed:', reason)
+        this.logAction(`answer-fail ${reason.slice(0, 40)}`, from)
         this.closePeer(from, 'answer-fail')
       }
       return
@@ -985,6 +1001,7 @@ this.closePeer(alias, 'presence-offline')
     // Who closes a pair determines whether the recreation loop (offer×N for one
     // alias) is a heal, a prune, or a transient failure — log it every time.
     dbg('closePeer', { peer, reason, hadEntry: !!entry, pcState: entry?.pc.connectionState })
+    this.logAction(`X ${reason}`, peer)
     if (!entry) return
     // Audit scope 5: a local teardown must be SIGNALED to the far side over
     // the encrypted channel, or it keeps a half-open pair with stale media
