@@ -75,6 +75,8 @@ export interface PeerMediaStats {
    *  on an ORPHAN transceiver while Chrome negotiates a sendrecv SDP for a
    *  trackless one — SDP says sendrecv yet ↑ stays 0: the count exposes it). */
   aTr: number
+  /** pc serial of this entry — changes show a closePeer+redial happened. */
+  pcId: number
   /** currentDirection of the transceiver owning entry.audioSender — the ONLY
    *  ground truth for whether OUR track is actually on the sending m-line. */
   trDir: string | null
@@ -98,10 +100,22 @@ type CallSig =
 /** Empty-slot placeholder for legacy pairs (no transform layer uses it). */
 const u8z = (): Uint8Array<ArrayBuffer> => new Uint8Array(0) as Uint8Array<ArrayBuffer>
 
-/** sender.transceiver — standardized, but absent from the TS DOM lib. */
+/** sender.transceiver — standardized, but absent from the TS DOM lib. Engine
+ *  versions older than Safari 17.4 don't populate it AT ALL, so a lookup
+ *  through pc.getTransceivers() is the only portable way to find a sender's
+ *  transceiver; sender.transceiver stays as a fast path. */
 const transceiverOf = (sender: RTCRtpSender | null): RTCRtpTransceiver | null => {
   if (!sender) return null
   return (sender as unknown as { transceiver?: RTCRtpTransceiver }).transceiver ?? null
+}
+
+/** The transceiver that actually carries `sender` on THIS pc — null when the
+ *  sender is stale (a previous pc's sender survives closePeer). Exposes the
+ *  exact failure shape: dir/rdir say SD/SD while entry.audioSender sits on an
+ *  EOL pc, its track still 'live' from before, and RTP never leaves. */
+function senderTransceiver(pc: RTCPeerConnection, sender: RTCRtpSender | null): RTCRtpTransceiver | null {
+  if (!sender) return null
+  return pc.getTransceivers().find(t => t.sender === sender) ?? null
 }
 
 /** Direction of the `m=audio` section in an SDP, or `?` when absent. Unlike
@@ -142,6 +156,8 @@ export class MediaCallClient {
   private peerSetup = new Set<string>()
   /** A receiver gets one decrypt transform for its lifetime — ontrack may repeat. */
   private attachedReceivers = new WeakSet<RTCRtpReceiver>()
+  /** Monotonic pc serial for PeerEntry.pcId (telemetry: rebuild churn detect). */
+  private pcSerial = 0
   /** Peers whose inbound frames are actively failing to decrypt. */
   private decryptFailing = new Set<string>()
   private healing = new Set<string>()
@@ -218,7 +234,7 @@ export class MediaCallClient {
       const sender = entry.audioSender
       const rx = entry.pc.getReceivers().find(r => r.track?.kind === 'audio')
       const aTrs = entry.pc.getTransceivers().filter(tr => tr.receiver.track?.kind === 'audio' || tr.sender.track?.kind === 'audio')
-      const trDir = sender ? (transceiverOf(sender)?.currentDirection ?? null) : null
+      const trDir = senderTransceiver(entry.pc, sender)?.currentDirection ?? null
       const base: PeerMediaStats = {
         conn: entry.pc.connectionState,
         sig: entry.pc.signalingState,
@@ -229,6 +245,7 @@ export class MediaCallClient {
         rxAttached: !!rx && this.attachedReceivers.has(rx),
         decryptFailing: this.decryptFailing.has(peer),
         aTr: aTrs.length,
+        pcId: entry.pcId,
         trDir,
         sLive: sender?.track?.readyState ?? null,
         ts: Date.now(),
@@ -278,6 +295,20 @@ this.closePeer(alias, 'presence-offline')
       // already-negotiated sendrecv line the track just drops in via
       // replaceTrack, no renegotiation needed.
       if (this.micTrack?.readyState === 'live' && this.audioEnabled) {
+        // STALE-SENDER resync: a previous pc's sender survives closePeer, so
+        // entry.audioSender can point at an EOL pc while the LIVE pc negotiates
+        // its own audio transceiver — every attach (transform / replaceTrack)
+        // then hits the old sender and the current one silently stays empty:
+        // the exact 'SD/SD, TX:e2ee, mk:live, yet ↑0' panel. Repoint to the
+        // transceiver the CURRENT pc actually negotiated as send-capable.
+        const own = senderTransceiver(entry.pc, entry.audioSender)
+        const active = entry.pc.getTransceivers().find(tr =>
+          tr.receiver.track?.kind === 'audio' && (tr.currentDirection ?? '').includes('send'),
+        ) ?? entry.pc.getTransceivers().find(tr => tr.receiver.track?.kind === 'audio')
+        if (!own && active) {
+          entry.audioSender = active.sender
+          dbg('tick heal: audio sender re-pointed to current pc transceiver', { peer: alias, pcId: entry.pcId })
+        }
         // UNCONDITIONAL: replaceTrack is idempotent, and the old guard
         // (`some transceiver with a live sender track`) could be satisfied by
         // a live track on an ORPHAN transceiver while the negotiated one stays
@@ -286,7 +317,7 @@ this.closePeer(alias, 'presence-offline')
         // The sender's OWN transceiver must be negotiated send-capable. SDP
         // can SAY sendrecv while the real sender sits on a transceiver Chrome
         // answered recvonly — replaceTrack can't un-negotiate that: rebuild.
-        const trDir = entry.audioSender ? transceiverOf(entry.audioSender)?.currentDirection ?? null : null
+        const trDir = senderTransceiver(entry.pc, entry.audioSender)?.currentDirection ?? null
         if (trDir && !trDir.includes('send')) {
           console.warn('[media] audio sender transceiver not send-capable (' + trDir + ') — rebuilding pair', { peer: alias })
           dbg('tick heal: sender-transceiver-not-send', { peer: alias, trDir })
@@ -528,6 +559,7 @@ this.closePeer(alias, 'presence-offline')
     const entry: PeerEntry = {
       pc, stream, audioSender: null,
       createdAt: Date.now(),
+      pcId: ++this.pcSerial,
       salts: new Promise(res => { saltResolve = res }),
       encAttach: new WeakSet(),
       lastOffer: '',

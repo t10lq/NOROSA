@@ -424,6 +424,7 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
               <span style={{ color: (s.trDir ?? '').includes('send') ? '#7BD88F' : '#E5A24A' }}> tr:{s.trDir ?? '?'}</span>
               <span style={{ opacity: 0.7 }}> aTr:{s.aTr}</span>
               <span style={{ opacity: 0.7 }}> mk:{s.sLive ?? 'x'}</span>
+              <span style={{ opacity: 0.7 }}> pc:{s.pcId}</span>
             </div>
           ))}
           <div style={{ opacity: 0.5, marginTop: 4 }}>dir = MY m-line / THEIR m-line · SD/MY+THEIR · tr = sender transceiver direction (must include 'send' or ↑ stays 0) · aTr = audio transceiver count · mk = mic readyState on sender</div>

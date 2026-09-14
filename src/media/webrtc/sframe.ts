@@ -4,6 +4,11 @@ export type PeerEntry = {
   audioSender: RTCRtpSender | null
   /** When this entry's pc was created — the negotiation-stuck heal uses it. */
   createdAt: number
+  /** Monotonic serial of THIS entry's current pc — every closePeer+redial
+   *  increments it, so a stale audioSender (an EOL pc from a previous build)
+   *  is exposed by pcId changing while the sender stays put. Telemetry shows
+   *  it as `pc:N` next to tr/mk. */
+  pcId: number
   /** Resolves with the media key + per-direction SFrame salts once the key
    *  lands. Crypto attachment must AWAIT this — never attach with a zero key. */
   salts: Promise<{ key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }>
