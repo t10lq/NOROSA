@@ -2,6 +2,8 @@ export type PeerEntry = {
   pc: RTCPeerConnection
   stream: MediaStream
   audioSender: RTCRtpSender | null
+  /** When this entry's pc was created — the negotiation-stuck heal uses it. */
+  createdAt: number
   /** Resolves with the media key + per-direction SFrame salts once the key
    *  lands. Crypto attachment must AWAIT this — never attach with a zero key. */
   salts: Promise<{ key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }>

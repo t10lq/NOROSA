@@ -253,6 +253,20 @@ this.closePeer(alias, 'presence-offline')
         setTimeout(() => void this.connectTo(alias), 500)
         continue
       }
+      // A pair that created an offer (or answer) but whose remote never
+      // joined the exchange is dead-in-the-water — the encrypted signaling
+      // frame either never crossed or failed to decrypt on the far side. The
+      // diagnostics bar shows exactly this shape (sig stuck at have-local-
+      // offer / have-local-answer while the far side sits stable+empty).
+      // Rebuild instead of waiting forever; the redial re-arms keying and
+      // renews the ratchet on both ends.
+      const sig = entry.pc.signalingState
+      if (sig === 'have-local-offer' && Date.now() - entry.createdAt > 6000) {
+        console.warn('[media] negotiation stuck (' + sig + ') — re-dialing pair', { peer: alias })
+        this.closePeer(alias, 'negotiation-stuck', true)
+        setTimeout(() => void this.connectTo(alias), 600)
+        continue
+      }
       if (entry.e2ee) {
         // Sender transform missing + a live mic = we send this peer PLAIN
         // frames while they decrypt → their silence. Re-attach when the
@@ -396,6 +410,7 @@ this.closePeer(alias, 'presence-offline')
     let saltResolve: (s: { key: Uint8Array; send: Uint8Array<ArrayBuffer>; recv: Uint8Array<ArrayBuffer> }) => void = () => {}
     const entry: PeerEntry = {
       pc, stream, audioSender: null,
+      createdAt: Date.now(),
       salts: new Promise(res => { saltResolve = res }),
       encAttach: new WeakSet(),
       lastOffer: '',
