@@ -109,6 +109,20 @@ const transceiverOf = (sender: RTCRtpSender | null): RTCRtpTransceiver | null =>
   return (sender as unknown as { transceiver?: RTCRtpTransceiver }).transceiver ?? null
 }
 
+/** Outbound audio RTP packets on THIS pc right now (0/1 = the send pipeline
+ *  is dead even when the transceiver, track and transform all look green). */
+async function audioOutboundPackets(pc: RTCPeerConnection): Promise<number> {
+  try {
+    const report = await pc.getStats()
+    let n = 0
+    for (const s of report.values()) {
+      const x = s as { type: string; kind?: string; packetsSent?: number }
+      if (x.type === 'outbound-rtp' && x.kind === 'audio' && typeof x.packetsSent === 'number') n += x.packetsSent
+    }
+    return n
+  } catch { return 0 }
+}
+
 /** The transceiver that actually carries `sender` on THIS pc — null when the
  *  sender is stale (a previous pc's sender survives closePeer). Exposes the
  *  exact failure shape: dir/rdir say SD/SD while entry.audioSender sits on an
@@ -158,6 +172,13 @@ export class MediaCallClient {
   private attachedReceivers = new WeakSet<RTCRtpReceiver>()
   /** Monotonic pc serial for PeerEntry.pcId (telemetry: rebuild churn detect). */
   private pcSerial = 0
+  /** Per-peer count of offerer-send-stuck rebuild kicks + the pcId each kick
+   *  consumed. Safari OFFERERS repeatedly ship a green transceiver (sendrecv,
+   *  live mic, transform attached) that never emits more than a packet or two;
+   *  only a fresh pc wakes the send pipeline. Kicks are capped to avoid churn:
+   *  one per pc, two total for the session. */
+  private offerKicks = new Map<string, number>()
+  private kickedPc = new Map<string, number>()
   /** Peers whose inbound frames are actively failing to decrypt. */
   private decryptFailing = new Set<string>()
   private healing = new Set<string>()
@@ -364,6 +385,27 @@ this.closePeer(alias, 'presence-offline')
         // encrypted frames arrive undecrypted (dropped). Idempotent WeakSet.
         for (const r of entry.pc.getReceivers()) {
           if (!this.attachedReceivers.has(r)) void this.attachReceiverWhenReady(alias, entry, r).catch(() => {})
+        }
+      }
+      // Safari-OFFERER send-pipeline kick: a connected pair whose SDP claims
+      // send in BOTH directions and whose mic lives, yet whose outbound audio
+      // RTP sits at a packet or two, never heals by itself — replaceTrack and
+      // re-attach only feed the sender; the pipeline itself is dead. A fresh
+      // pc re-arms it (observed: the SAME Safari device sends 5k+ packets the
+      // moment it answers, so Safari CAN send — only its offer-side pipeline
+      // died). Kick ONCE per pc, twice per session, then stop churning.
+      if (this.micTrack?.readyState === 'live' && this.audioEnabled &&
+          ld.includes('send') && sdpAudioDir(entry.pc.remoteDescription?.sdp).includes('send')) {
+        const outbound = await audioOutboundPackets(entry.pc)
+        if (outbound <= 1 && (this.offerKicks.get(alias) ?? 0) < 2 && this.kickedPc.get(alias) !== entry.pcId) {
+          const kicks = (this.offerKicks.get(alias) ?? 0) + 1
+          this.offerKicks.set(alias, kicks)
+          this.kickedPc.set(alias, entry.pcId)
+          console.warn(`[media] offerer send-stuck (out=${outbound}) — kick ${kicks}/2, redial`, { peer: alias })
+          this.logAction(`offerer-send-stuck kick ${kicks}/2 → redial`, alias)
+          this.closePeer(alias, 'offerer-send-stuck', true)
+          setTimeout(() => void this.connectTo(alias), 700)
+          continue
         }
       }
     }
