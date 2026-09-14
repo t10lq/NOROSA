@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import type { ReactNode } from 'react'
 import { useE2e } from './E2eContext'
 import { dbg } from '../debug'
-import { MediaCallClient, defaultIceServers, probeEncodedStreamsCaps, type EncodedCapsProbe, type MediaCallEvents } from '../media/webrtc'
+import { MediaCallClient, defaultIceServers, probeEncodedStreamsCaps, type EncodedCapsProbe, type MediaCallEvents, type PeerMediaStats } from '../media/webrtc'
 
 /**
  * Media-plane bridge.
@@ -47,6 +47,8 @@ export interface CallContextValue {
   /** Browser-provided reason for the refusal (NotAllowedError etc.). */
   micError: string | null
   peerStates: ReadonlyMap<string, RTCPeerConnectionState>
+  /** Live transport readout per peer (2s cadence) for the diagnostics bar. */
+  peerStats: ReadonlyMap<string, PeerMediaStats>
   toggleMic: () => void
   setMicOn: (on: boolean) => void
   reconfigureDevices: (micId: string | null) => void
@@ -61,6 +63,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
   const [peerMics, setPeerMics] = useState<ReadonlyMap<string, boolean>>(new Map())
   const [decryptDrops, setDecryptDrops] = useState<ReadonlyMap<string, boolean>>(new Map())
   const [peerStates, setPeerStates] = useState<ReadonlyMap<string, RTCPeerConnectionState>>(new Map())
+  const [peerStats, setPeerStats] = useState<ReadonlyMap<string, PeerMediaStats>>(new Map())
   const [micOn, setMicOnState] = useState(true)
   const [micBlocked, setMicBlocked] = useState(false)
   const [micError, setMicError] = useState<string | null>(null)
@@ -111,6 +114,13 @@ export function CallProvider({ children }: { children: ReactNode }) {
       onPeerMic: (peer, muted) => {
         setPeerMics(prev => new Map(prev).set(peer, muted))
       },
+      onStats: (peer, s) => {
+        setPeerStats(prev => {
+          const next = new Map(prev)
+          next.set(peer, s)
+          return next
+        })
+      },
       onMicError: (message) => {
         setMicBlocked(true)
         setMicError(message ?? 'Permission denied')
@@ -142,6 +152,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setRemoteStreams(new Map())
       setPeerMics(new Map())
       setPeerStates(new Map())
+      setPeerStats(new Map())
     }
   }, [service, isReady])
 
@@ -198,6 +209,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       peerMics,
       decryptDrops,
       peerStates,
+      peerStats,
       micOn,
       micPending,
       micBlocked,
@@ -206,7 +218,7 @@ export function CallProvider({ children }: { children: ReactNode }) {
       setMicOn,
       reconfigureDevices,
     }),
-    [media, cryptoMode, remoteStreams, peerMics, decryptDrops, peerStates, micOn, micPending, micBlocked, micError, toggleMic, setMicOn, reconfigureDevices],
+    [media, cryptoMode, remoteStreams, peerMics, decryptDrops, peerStates, peerStats, micOn, micPending, micBlocked, micError, toggleMic, setMicOn, reconfigureDevices],
   )
 
   return <CallContext.Provider value={value}>{children}</CallContext.Provider>

@@ -23,6 +23,7 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
   const [copied, setCopied] = useState(false)
   const hideRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [diagOpen, setDiagOpen] = useState(false)
   const [sameDeviceTab, setSameDeviceTab] = useState(false)
   useEffect(() => {
     const poll = setInterval(() => {
@@ -380,6 +381,51 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
           </Btn>
         </div>
       </div>
+
+      {/* Live media diagnostics — one tap, no devtools. Every row is that
+          peer's audio link FROM THIS device's perspective: ↑ = packets we
+          sent to them, ↓ = packets we received from them. A constant-0 here
+          names the broken half instantly (see the dir / tx / rx columns). */}
+      {!diagOpen ? (
+        <button onClick={() => setDiagOpen(true)}
+          style={{
+            position: 'fixed', left: 10, bottom: isMobile ? 100 : 12, zIndex: 70,
+            background: 'rgba(10,10,11,0.85)', border: '1px solid rgba(255,255,255,0.14)',
+            borderRadius: 8, color: '#6E6E77', fontFamily: "'Space Mono'", fontSize: 10,
+            letterSpacing: '0.08em', padding: '5px 9px', cursor: 'pointer',
+            backdropFilter: 'blur(12px)',
+          }}>
+          MEDIA ⓘ
+        </button>
+      ) : (
+        <div style={{
+          position: 'fixed', left: 10, bottom: isMobile ? 100 : 12, zIndex: 70,
+          background: 'rgba(8,8,10,0.94)', border: '1px solid rgba(255,255,255,0.16)',
+          borderRadius: 10, padding: 10, fontFamily: "'Space Mono'", fontSize: 9,
+          color: '#8B8B96', lineHeight: '15px', maxWidth: '92vw',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.7)', backdropFilter: 'blur(12px)',
+        }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+            <b style={{ color: '#C9C9D4', letterSpacing: '0.06em' }}>MEDIA LIVE</b>
+            <button onClick={() => setDiagOpen(false)} style={{ background: 'none', border: 'none', color: '#6E6E77', cursor: 'pointer', fontFamily: "'Space Mono'", fontSize: 10 }}>✕</button>
+          </div>
+          <div style={{ opacity: 0.55 }}>ME · {calls.micOn ? 'mic ON' : 'mic OFF'}{calls.micBlocked ? ' (BLOCKED)' : ''} · {calls.supported ? 'E2EE-capable' : 'DTLS-SRTP-only'} · {calls.cryptoMode.toUpperCase()}</div>
+          {[...calls.peerStats.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([peer, s]) => (
+            <div key={peer} style={{ whiteSpace: 'nowrap' }}>
+              <span style={{ color: '#D7D7E0' }}>{peer.slice(0, 6)}</span>
+              <span> {s.conn === 'connected' ? 'CONN' : s.conn.toUpperCase()} </span>
+              <span style={{ color: s.dir === 'sendrecv' ? '#7BD88F' : '#E5A24A' }}>{s.dir === 'sendrecv' ? 'SD' : s.dir ? s.dir.slice(0, 4).toUpperCase() : '?'}</span>
+              <span> ↑{s.packetsSent} · ↓{s.packetsReceived}</span>
+              <span style={{ color: s.hasMic ? '#7BD88F' : '#8B8B96' }}>{s.hasMic ? ' M+' : ' M-'}</span>
+              <span style={{ color: s.txAttached ? '#7BD88F' : '#8B8B96' }}>{s.txAttached ? ' TX:e2ee' : ' TX:--'}</span>
+              <span style={{ color: s.rxAttached ? '#7BD88F' : '#8B8B96' }}>{s.rxAttached ? ' RX:e2ee' : ' RX:--'}</span>
+              {s.decryptFailing && <span style={{ color: '#FF6B5E' }}> DROPS!</span>}
+              <span> {s.rttMs != null ? `${s.rttMs}ms` : ''}</span>
+            </div>
+          ))}
+          <div style={{ opacity: 0.5, marginTop: 4 }}>on a silent device: ↓ stays 0 ⇒ nothing arriving · its ↑=0 ⇒ it never negotiated send (SD off)</div>
+        </div>
+      )}
 
       {chatOpen && (
         isMobile ? (

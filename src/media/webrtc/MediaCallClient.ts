@@ -51,6 +51,24 @@ export interface MediaCallEvents {
   onPeerMic?: (peerAlias: string, muted: boolean) => void
   /** A peer's inbound audio is actively failing to decrypt (2s cadence). */
   onFrameDrop?: (peerAlias: string) => void
+  /** Live transport readout for a peer (2s cadence) — the on-screen media
+   *  diagnostics bar. */
+  onStats?: (peerAlias: string, s: PeerMediaStats) => void
+}
+
+export interface PeerMediaStats {
+  conn: RTCPeerConnectionState
+  dir: RTCRtpTransceiverDirection | ''
+  hasMic: boolean
+  /** Local audio sender carries the encrypt transform. */
+  txAttached: boolean
+  /** Local audio receiver carries the decrypt transform. */
+  rxAttached: boolean
+  decryptFailing: boolean
+  ts: number
+  packetsSent: number
+  packetsReceived: number
+  rttMs: number | null
 }
 
 // ── Signaling payloads (inside the double-ratchet envelope) ───────
@@ -78,6 +96,7 @@ export class MediaCallClient {
   private started = false
   private disposed = false
   private reconnect?: ReturnType<typeof setTimeout>
+  private statsTimer?: ReturnType<typeof setInterval>
   private micTrack: MediaStreamTrack | null = null
   private micDeviceId: string | null = null
   private audioEnabled = true
@@ -137,6 +156,45 @@ export class MediaCallClient {
 
     await this.reconcile()
     this.reconnect = setTimeout(() => void this.tick(), 1500)
+    this.statsTimer = setInterval(() => void this.emitStats(), 2000)
+  }
+
+  /** Emit a live transport readout per peer (drives the on-screen diagnostics
+   *  bar — zero devtools needed to see whether a phone actually sends, and
+   *  whether the far side receives + decrypts). getStats gives us ground
+   *  truth that the two most common one-way-silence shapes disagree on:
+   *    • sender never negotiated (recvonly)  → packetsSent stays 0
+   *    • frames sent but undecryptable        → packetsReceived grows but the
+   *      user hears nothing (the PC decrypts and drops them). */
+  private async emitStats(): Promise<void> {
+    for (const [peer, entry] of this.peers) {
+      const sender = entry.audioSender
+      const rx = entry.pc.getReceivers().find(r => r.track?.kind === 'audio')
+      const base: PeerMediaStats = {
+        conn: entry.pc.connectionState,
+        dir: transceiverOf(sender)?.direction ?? '',
+        hasMic: this.micTrack?.readyState === 'live' && !!this.audioEnabled,
+        txAttached: !!sender && entry.encAttach.has(sender),
+        rxAttached: !!rx && this.attachedReceivers.has(rx),
+        decryptFailing: this.decryptFailing.has(peer),
+        ts: Date.now(),
+        packetsSent: 0,
+        packetsReceived: 0,
+        rttMs: null,
+      }
+      void entry.pc.getStats().then(report => {
+        let packetsSent = 0
+        let packetsReceived = 0
+        let rttMs: number | null = null
+        for (const r of report.values()) {
+          const s = r as { type: string; kind?: string; packetsSent?: number; packetsReceived?: number; droppedPackets?: number; state?: string; currentRoundTripTime?: number }
+          if (s.type === 'outbound-rtp' && s.kind === 'audio' && typeof s.packetsSent === 'number') packetsSent += s.packetsSent
+          if (s.type === 'inbound-rtp' && s.kind === 'audio' && typeof s.packetsReceived === 'number') packetsReceived += s.packetsReceived
+          if (s.type === 'candidate-pair' && s.state === 'succeeded' && typeof s.currentRoundTripTime === 'number') rttMs = Math.round(s.currentRoundTripTime * 1000)
+        }
+        this.events.onStats?.(peer, { ...base, packetsSent, packetsReceived, rttMs })
+      }).catch(() => {})
+    }
   }
 
   private handlePresence(alias: string, online: boolean): void {
@@ -861,6 +919,7 @@ this.closePeer(alias, 'presence-offline')
   dispose(): void {
     this.disposed = true
     if (this.reconnect) clearTimeout(this.reconnect)
+    if (this.statsTimer) clearInterval(this.statsTimer)
     this.unsubPresence?.()
     for (const peer of [...this.peers.keys()]) this.closePeer(peer, 'dispose')
     this.micTrack?.stop()
