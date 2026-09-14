@@ -746,6 +746,18 @@ await Promise.race([
         // which is exactly how `answer=recvonly mic=live` kept happening. Force
         // the mic onto THIS sender right now, whatever the key did.
         await this.ensureSenderTrack(entry, from)
+        // Mid-mismatch belt: the offered audio m-line binds to whichever
+        // transceiver carries an audio RECEIVER — not necessarily
+        // entry.audioSender (a mid conflict leaves our prepared sender on an
+        // orphan transceiver, and Chrome then answers recvonly with a live mic
+        // in hand, as the panel kept proving). Sweep every transceiver: the
+        // audio-receiver's one becomes sendrecv and takes our live track.
+        for (const tr of entry.pc.getTransceivers()) {
+          if (tr.receiver.track.kind !== 'audio' && tr.sender.track?.kind !== 'audio') continue
+          if (tr.direction !== 'sendrecv') tr.direction = 'sendrecv'
+          const live = this.micTrack?.readyState === 'live' ? this.micTrack : (entry.audioSender?.track as MediaStreamTrack | null)
+          if (live && live.readyState === 'live' && tr.sender.track !== live) tr.sender.replaceTrack(live)
+        }
         dbg('answering offer', { from, audioDirection: sdpAudioDir(entry.pc.localDescription?.sdp), audioHasTrack: !!entry.audioSender?.track, micTrackLive: this.micTrack?.readyState === 'live' })
         await entry.pc.setLocalDescription(await entry.pc.createAnswer())
         // Safari can still answer recvonly for the audio m-line despite a
