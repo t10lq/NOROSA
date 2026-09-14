@@ -628,8 +628,13 @@ this.closePeer(alias, 'presence-offline')
         700,
       )
       dbg('media key ready for', peer)
-      send = await deriveSalt(k, peer) // encrypt our sends TO this peer
-      recv = await deriveSalt(k, this.svc.selfAlias ?? '') // decrypt THEIR sends
+      // Salts over the STABLE identity pair, not the per-connection alias — a
+      // reconnect re-derives a fresh alias and the old alias-derived recv salt
+      // would stop matching the peer's send salt (RTP climbs, TX/RX:e2ee stay
+      // attached, but one side decodes silence for the rest of the call).
+      const names = await this.svc.mediaSalts(peer)
+      send = await deriveSalt(k, names.sendName) // encrypt our sends TO this peer
+      recv = await deriveSalt(k, names.recvName) // decrypt THEIR sends
       key = k
     }
 

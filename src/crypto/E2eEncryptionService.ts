@@ -816,6 +816,26 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
   return p
 }
 
+  /** Stable SALT names for the pair's SFrame transforms. The media key is
+   *  celled by the identity pair — but the send/recv salts were derived from
+   *  the volatile ALIAS. Reconnect any side and its re-dial derives over a NEW
+   *  alias: the phone's send salt (over its stale view of our alias) stops
+   *  matching our recv salt (over our fresh one) — RTP keeps climbing and the
+   *  decrypt still succeeds schema-wise, so both TX/RX:e2ee show attached, yet
+   *  one side hears silence while the other works. Resolve the peer's
+   *  curve25519 identity (stable across reconnects) and derive over identities
+   *  instead; a short retry only means a normal key fetch racing the bundle. */
+  async mediaSalts(peerAlias: string): Promise<{ sendName: string; recvName: string }> {
+    let peerId = ''
+    for (let attempt = 0; attempt < 3 && !peerId; attempt++) {
+      try { peerId = await this.identityOf(peerAlias) } catch { await new Promise(r => setTimeout(r, 750)) }
+    }
+    return {
+      sendName: peerId || peerAlias,
+      recvName: this.identityKey || (this.selfAlias ?? ''),
+    }
+  }
+
   /** Best-effort persist of the agreed media key under the STABLE identity
    *  pair, so a reload or reconnect of either device reuses it. Resolving the
    *  peer's identity may need a key fetch, therefore this is fire-and-forget:
