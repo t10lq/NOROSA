@@ -121,6 +121,10 @@ export class MediaCallClient {
   private statsTimer?: ReturnType<typeof setInterval>
   private micTrack: MediaStreamTrack | null = null
   private micDeviceId: string | null = null
+  /** True only after a getUserMedia attempt settled WITHOUT a track (denied or
+   *  no device). False while a request is pending — so an answer that came
+   *  back recvonly can't ship while the operator might still grant (Safari). */
+  private micDenied = false
   private audioEnabled = true
   private mediaKeyCache = new Map<string, Uint8Array>()
   private encryptFails = new Map<string, number>()
@@ -343,6 +347,7 @@ this.closePeer(alias, 'presence-offline')
     if (this.micTrack && this.micDeviceId === deviceId && this.micTrack.readyState === 'live') return this.micTrack
     this.micTrack?.stop()
     this.micTrack = null
+    this.micDenied = false
     this.micDeviceId = deviceId
 
     // Some engines reject rich boolean constraints (echoCancellation etc.)
@@ -374,6 +379,7 @@ this.closePeer(alias, 'presence-offline')
     }
     if (!stream || !stream.getAudioTracks()[0]) {
       console.warn('[media] mic unavailable:', lastErr)
+      this.micDenied = true
       this.events.onMicError?.(lastErr)
       throw new Error('Microphone unavailable.')
     }
@@ -668,18 +674,21 @@ this.closePeer(alias, 'presence-offline')
             dbg('audio m-line pinned sendrecv on answer', { peer: from, was })
           }
         }
-        // Safari derives the answer's direction from the track attached AT
+// Safari derives the answer's direction from the track attached AT
         // answer time — the direction property alone does not override a
         // trackless sender. The peer's offer usually lands while the mic is
-        // still in the OS permission prompt, so hold the reply until the
+        // still inside the OS permission prompt, so hold the reply until the
         // background ensureMic (already in flight via prepareMedia → salts)
         // either grants us a track or gives up, then answer with the mic
-        // actually on the sender. Cap at 2.5s so a permanently-pending device
+        // actually on the sender. Cap at 5s so a permanently-pending device
         // prompt never stalls negotiation — the track still lands later via
         // replaceTrack, but audio then needs a renegotiation to transport.
+        // (5s, not 2.5s: iOS Safari's permission sheet regularly eats ~3s,
+        // and the telemetry showed the phone answering recvonly — then
+        // tearing the pair down every 4s — while the mic was still pending.)
         await Promise.race([
           entry.salts,
-          new Promise<void>(res => setTimeout(res, 2500)),
+          new Promise<void>(res => setTimeout(res, 5000)),
         ]).catch(() => {})
         dbg('answering offer', { from, audioDirection: sdpAudioDir(entry.pc.localDescription?.sdp), audioHasTrack: !!entry.audioSender?.track, micTrackLive: this.micTrack?.readyState === 'live' })
         await entry.pc.setLocalDescription(await entry.pc.createAnswer())
@@ -690,7 +699,12 @@ this.closePeer(alias, 'presence-offline')
         // layer rebuilds both sides in under a second, and by then the mic
         // grant is cached so the retry answers with the track present.
         const answeredDir = sdpAudioDir(entry.pc.localDescription?.sdp)
-        if (answeredDir !== 'sendrecv' && this.micTrack?.readyState === 'live') {
+        // Never ship an answer that eliminates our send while the mic is live
+        // OR still in play (grant pending) — a recvonly `answer-not-sendrecv`
+        // right now just made this pair's fate: tear it down, the re-dial
+        // answers with the track present. Only a DEFINITELY denied mic ships
+        // recvonly — that sender has nothing to send by definition.
+        if (answeredDir !== 'sendrecv' && (this.micTrack?.readyState === 'live' || !this.micDenied)) {
           console.warn(`[media] answer came back ${answeredDir} with a live mic — re-negotiating`, { peer: from })
           dbg('answer-not-sendrecv: immediate re-negotiation', { peer: from, dir: answeredDir })
           this.closePeer(from, 'answer-not-sendrecv', true)
