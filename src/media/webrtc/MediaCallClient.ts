@@ -65,6 +65,12 @@ type CallSig =
 /** Empty-slot placeholder for legacy pairs (no transform layer uses it). */
 const u8z = (): Uint8Array<ArrayBuffer> => new Uint8Array(0) as Uint8Array<ArrayBuffer>
 
+/** sender.transceiver — standardized, but absent from the TS DOM lib. */
+const transceiverOf = (sender: RTCRtpSender | null): RTCRtpTransceiver | null => {
+  if (!sender) return null
+  return (sender as unknown as { transceiver?: RTCRtpTransceiver }).transceiver ?? null
+}
+
 // ── The call client ───────────────────────────────────────────────
 
 export class MediaCallClient {
@@ -144,10 +150,30 @@ this.closePeer(alias, 'presence-offline')
     }
   }
 
-  /** Periodic self-heal: pick up peers that a missed presence push skipped. */
+  /** Periodic self-heal: pick up peers that a missed presence push skipped,
+   *  and re-attach any crypto step whose one-shot connection-time hook never
+   *  ran (e.g. a mic granted after 'connected' or a receiver whose ontrack
+   *  fired before the pair was decrypt-capable). All guards are idempotent. */
   private async tick(): Promise<void> {
     if (this.disposed) return
     await this.reconcile()
+    for (const [alias, entry] of this.peers) {
+      if (entry.pc.connectionState !== 'connected') continue
+      if (entry.e2ee) {
+        // Sender transform missing + a live mic = we send this peer PLAIN
+        // frames while they decrypt → their silence. Re-attach when the
+        // one-shot 'connected' hook ran before the mic existed.
+        if (this.micTrack?.readyState === 'live' && entry.audioSender && !entry.encAttach.has(entry.audioSender)) {
+          dbg('tick heal: attaching sender crypto', { peer: alias })
+          this.attachSend(alias, entry.audioSender, 'audio', this.micTrack)
+        }
+        // Receiver decrypt missing for an already-connected pair → their
+        // encrypted frames arrive undecrypted (dropped). Idempotent WeakSet.
+        for (const r of entry.pc.getReceivers()) {
+          if (!this.attachedReceivers.has(r)) void this.attachReceiverWhenReady(alias, entry, r).catch(() => {})
+        }
+      }
+    }
     this.reconnect = setTimeout(() => void this.tick(), 4000)
   }
 
@@ -428,6 +454,11 @@ this.closePeer(alias, 'presence-offline')
         console.warn('[media] negotiation-start blocked (offer already in flight)', { peer })
       } else {
         entry.offerInFlight = true
+        // Same m-line pinning as the answer path: a trackless sender at offer
+        // time (mic still in the prompt / denied) must NOT collapse the audio
+        // line to recvonly — the track arrives via replaceTrack later.
+        const audioTr = transceiverOf(entry.audioSender)
+        if (audioTr && audioTr.direction !== 'sendrecv') audioTr.direction = 'sendrecv'
         await entry.pc.setLocalDescription(await entry.pc.createOffer())
         const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
         const skel = entry.pc.localDescription?.sdp.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
@@ -500,7 +531,23 @@ this.closePeer(alias, 'presence-offline')
       }
       try {
         await entry.pc.setRemoteDescription({ type: 'offer', sdp: sig.d })
-        dbg('answered offer', { from, receiversAfter: entry.pc.getReceivers().length, mLines: entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0 })
+        // iOS Safari derives the answer's m-line direction from which track is
+        // attached AT answer time. The phone's mic is usually still inside the
+        // permission prompt when a peer's offer lands (the browser's prompt
+        // latency is a second or two), so the answer would come back `recvonly`
+        // for audio — the phone's outbound audio is then never negotiated and
+        // the far side hears silence in that direction forever (the one-way
+        // call). Pin the audio line to sendrecv regardless of mic readiness:
+        // the track drops in via replaceTrack the moment the grant resolves.
+        const audioTr = transceiverOf(entry.audioSender)
+        if (audioTr) {
+          const was = audioTr.direction
+          if (was !== 'sendrecv') {
+            audioTr.direction = 'sendrecv'
+            dbg('audio m-line pinned sendrecv on answer', { peer: from, was })
+          }
+        }
+        dbg('answered offer', { from, receiversAfter: entry.pc.getReceivers().length, audioDirection: transceiverOf(entry.audioSender)?.direction, audioHasTrack: !!entry.audioSender?.track, mLines: entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0 })
         await entry.pc.setLocalDescription(await entry.pc.createAnswer())
         this.svc.sendCallSignal(from, JSON.stringify({ p: 'answer', d: entry.pc.localDescription!.sdp, e: this.e2eeSupported }))
         await this.flushIce(entry)
