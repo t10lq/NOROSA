@@ -551,6 +551,18 @@ this.closePeer(alias, 'presence-offline')
         const audioTr = transceiverOf(entry.audioSender)
         if (audioTr && audioTr.direction !== 'sendrecv') audioTr.direction = 'sendrecv'
         await entry.pc.setLocalDescription(await entry.pc.createOffer())
+        // Same sanity as the answer path: an offer that drops our audio send
+        // direction while the mic is live is never shipped — rebuild the pair
+        // so the retry carries the track from the first SDP line.
+        const offeredDir = sdpAudioDir(entry.pc.localDescription?.sdp)
+        if (offeredDir !== 'sendrecv' && this.micTrack?.readyState === 'live') {
+          console.warn(`[media] offer came back ${offeredDir} with a live mic — re-negotiating`, { peer })
+          dbg('offer-not-sendrecv: immediate re-negotiation', { peer, dir: offeredDir })
+          this.closePeer(peer, 'offer-not-sendrecv', true)
+          setTimeout(() => void this.connectTo(peer), 300)
+          // The pair is being torn down; these placeholders are never used.
+          return { key: u8z(), send: u8z(), recv: u8z() }
+        }
         const ml = entry.pc.localDescription?.sdp.match(/m=/g)?.length ?? 0
         const skel = entry.pc.localDescription?.sdp.split('\n').filter(l => /^m=/.test(l) || /^a=mid:/.test(l)).join(' ') || '∅'
         dbg('sent offer', { peer, mLines: ml, mids: skel, transceivers: entry.pc.getTransceivers().length, receivers: entry.pc.getReceivers().length, sdpTail: entry.pc.localDescription?.sdp.slice(-24) })
@@ -653,6 +665,20 @@ this.closePeer(alias, 'presence-offline')
         ]).catch(() => {})
         dbg('answering offer', { from, audioDirection: sdpAudioDir(entry.pc.localDescription?.sdp), audioHasTrack: !!entry.audioSender?.track, micTrackLive: this.micTrack?.readyState === 'live' })
         await entry.pc.setLocalDescription(await entry.pc.createAnswer())
+        // Safari can still answer recvonly for the audio m-line despite a
+        // live track (it applies the sender's state at negotiation in ways
+        // the direction property does not override). Never ship an answer
+        // that eliminates our send — tear down and renegotiate; the dial
+        // layer rebuilds both sides in under a second, and by then the mic
+        // grant is cached so the retry answers with the track present.
+        const answeredDir = sdpAudioDir(entry.pc.localDescription?.sdp)
+        if (answeredDir !== 'sendrecv' && this.micTrack?.readyState === 'live') {
+          console.warn(`[media] answer came back ${answeredDir} with a live mic — re-negotiating`, { peer: from })
+          dbg('answer-not-sendrecv: immediate re-negotiation', { peer: from, dir: answeredDir })
+          this.closePeer(from, 'answer-not-sendrecv', true)
+          setTimeout(() => void this.connectTo(from), 300)
+          return
+        }
         this.svc.sendCallSignal(from, JSON.stringify({ p: 'answer', d: entry.pc.localDescription!.sdp, e: this.e2eeSupported }))
         await this.flushIce(entry)
       } catch (err) {
