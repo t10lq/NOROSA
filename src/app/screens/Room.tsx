@@ -424,6 +424,14 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
             </div>
           ))}
           <div style={{ opacity: 0.5, marginTop: 4 }}>dir = MY m-line / THEIR m-line · LEFT NOT SD ⇒ I never negotiated send (↑ stays 0) · bottom-left: ↑=0 and LI/RI not SD</div>
+          <div style={{ opacity: 0.75, marginTop: 3, borderTop: '1px solid rgba(255,255,255,0.10)', paddingTop: 3 }}>
+            {calls.frameTele.notes.map((n, i) => (
+              <div key={i} style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{n}</div>
+            ))}
+            {[...new Set([...calls.frameTele.delivered.keys(), ...calls.frameTele.dropped.keys()])].sort().map(p => (
+              <div key={p}>RFM {p.slice(0, 9)}: DEL {calls.frameTele.delivered.get(p) ?? 0} · DROP {calls.frameTele.dropped.get(p) ?? 0}</div>
+            ))}
+          </div>
         </div>
       )}
 

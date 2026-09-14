@@ -164,6 +164,23 @@ private constructor(
   /** Aliases live right now (presence pushes we have seen this connection). */
   private onlineAliases = new Set<string>()
 
+  /** Live telemetry for the on-screen diagnostics: frames delivered vs dropped
+   *  on the call wire, plus a short ring of the drop reasons. Lets a silent
+   *  phone print WHETHER an offer arrived and why it was dropped, no devtools. */
+  private callDelivered = new Map<string, number>()
+  private callDropped = new Map<string, number>()
+  private frameNotes: string[] = []
+  private noteFrame(peer: string, wire: string, ok: boolean, err?: string): void {
+    if (ok) this.callDelivered.set(peer, (this.callDelivered.get(peer) ?? 0) + 1)
+    else this.callDropped.set(peer, (this.callDropped.get(peer) ?? 0) + 1)
+    const line = `${new Date().toISOString().slice(11, 19)} ${peer.slice(0, 6)} ${wire} ${ok ? 'OK' : 'DROP ' + (err ?? '')}`
+    this.frameNotes.push(line)
+    if (this.frameNotes.length > 6) this.frameNotes.shift()
+  }
+  mediaTelemetry(): { delivered: Map<string, number>; dropped: Map<string, number>; notes: string[] } {
+    return { delivered: new Map(this.callDelivered), dropped: new Map(this.callDropped), notes: [...this.frameNotes] }
+  }
+
   /** Offerer-side key deliveries awaiting a peer ACK (see mediaKeyFor). */
   private awaitingMediaKeyAck = new Map<string, () => void>()
 
@@ -652,6 +669,7 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
           // relay never sees a byte of it. Base64-decoded into the waiting PC.
           const share = JSON.parse(await this.decryptEnvelopeRaw(from, env)) as { km: string }
           this.acceptMediaKey(from, base64ToBytes(share.km))
+          this.noteFrame(from, 'key', true)
           break
         }
         case 'call': {
@@ -660,8 +678,15 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
           // stored for an offline peer come back labelled 'msg', so route
           // them to the same listener here. Stale duplicates are dropped by
           // the ratchet's MAC check.
-          const payload = await this.decryptEnvelopeRaw(from, env)
-          if (payload) this.onCallFrame(from, payload)
+          try {
+            const payload = await this.decryptEnvelopeRaw(from, env)
+            if (payload) this.onCallFrame(from, payload)
+            this.noteFrame(from, 'mbx', true)
+          } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err)
+            console.warn('[norosa] dropped mailbox call frame:', reason)
+            this.noteFrame(from, 'mbx', false, reason)
+          }
           break
         }
       }
@@ -834,11 +859,15 @@ private async handleIncoming(from: string, raw: string): Promise<void> {
         // Confirmation from the answerer: stop re-shipping the pair key.
         const resolve = this.awaitingMediaKeyAck.get(from)
         if (resolve) { resolve(); this.awaitingMediaKeyAck.delete(from) }
+        this.noteFrame(from, 'call', true, 'ack')
         return ''
       }
+      this.noteFrame(from, 'call', true)
       return plain
     } catch (err) {
-      console.warn('[norosa] dropped call frame:', err instanceof Error ? err.message : err)
+      const reason = err instanceof Error ? err.message : String(err)
+      console.warn('[norosa] dropped call frame:', reason)
+      this.noteFrame(from, 'call', false, reason)
       return ''
     }
   }
