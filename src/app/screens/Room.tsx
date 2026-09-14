@@ -41,13 +41,21 @@ export function Room({ roomCode, alias, onExit }: { roomCode: string; alias: str
   const isTouch = useMediaQuery('(hover: none) and (pointer: coarse)')
   const speakerRouterRef = useRef<SpeakerRouter | null>(null)
   if (!speakerRouterRef.current) speakerRouterRef.current = new SpeakerRouter()
+  const callsRef = useRef(calls)
+  callsRef.current = calls
   // iOS/Android refuse unmuted play() outside a user gesture — re-run it on
   // the first pointer/touch/key so remote audio actually starts on phones.
+  // The same gesture re-requests the microphone: iOS silently denies a
+  // getUserMedia fired outside a user activation, which left phones with a
+  // working speaker but a dead mic (PC never hears them) until the user found
+  // the RETRY button or iOS Settings. Inside the handler both are legal.
   const unlockedRef = useRef(false)
   useEffect(() => {
     const unlock = () => {
       unlockedRef.current = true
       speakerRouterRef.current?.unlock()
+      const c = callsRef.current
+      if (c.micBlocked && !c.micPending) void c.setMicOn(true)
     }
     const evs = ['pointerdown', 'touchstart', 'keydown', 'click'] as const
     for (const ev of evs) window.addEventListener(ev, unlock, { once: true, passive: true })
