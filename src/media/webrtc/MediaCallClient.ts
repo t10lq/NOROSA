@@ -345,6 +345,36 @@ this.closePeer(alias, 'presence-offline')
     return attempt(1)
   }
 
+  /** Guarantee this pair's audio sender carries a LIVE track before we
+   *  create an answer/offer SDP. The share of rounds that answered recvonly
+   *  with `mic=live denied=false` happen because the answer path waits on
+   *  `entry.salts`, which resolves only AFTER the pair's mediaKeyFor finishes
+   *  — a slow key exchange times the 5s cap out while THIS sender's
+   *  replaceTrack is still queued, and Chrome/Safari then bake recvonly from
+   *  a trackless sender. Attaching HERE, right before negotiation, is the
+   *  only dependency the answer actually has. Returns false when the mic is
+   *  off or the grant is settled denied. */
+  private async ensureSenderTrack(entry: PeerEntry, peer: string, capMs = 4000): Promise<boolean> {
+    const senderTrack = (entry.audioSender?.track as MediaStreamTrack | null)?.readyState
+    if (senderTrack === 'live') return true
+    if (!this.audioEnabled) return false
+    if (this.micDenied) return false
+    try {
+      const mic = await Promise.race([
+        this.ensureMic(this.micDeviceId),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('mic attach cap')), capMs),
+        ),
+      ])
+      entry.audioSender?.replaceTrack(mic)
+      const attached = (entry.audioSender?.track as MediaStreamTrack | null)?.readyState === 'live'
+      dbg('ensureSenderTrack', { peer, attached, capMs })
+      return attached
+    } catch {
+      return false
+    }
+  }
+
   /** Some webcam drivers leave getUserMedia pending forever (hanging device).
    *  A stuck promise would keep the button "pending/blocked" with NO way to
    *  clear it — surface a hard timeout instead so the UI can recover. */
@@ -586,6 +616,9 @@ this.closePeer(alias, 'presence-offline')
         // line to recvonly — the track arrives via replaceTrack later.
         const audioTr = transceiverOf(entry.audioSender)
         if (audioTr && audioTr.direction !== 'sendrecv') audioTr.direction = 'sendrecv'
+        // Same hazard as the answer path: the offer must carry a live sender
+        // track or Chrome can bake recvonly into it too. Force the mic here.
+        await this.ensureSenderTrack(entry, peer)
         await entry.pc.setLocalDescription(await entry.pc.createOffer())
         // Same sanity as the answer path: an offer that drops our audio send
         // direction while the mic is live is never shipped — rebuild the pair
@@ -703,10 +736,16 @@ this.closePeer(alias, 'presence-offline')
         // (5s, not 2.5s: iOS Safari's permission sheet regularly eats ~3s,
         // and the telemetry showed the phone answering recvonly — then
         // tearing the pair down every 4s — while the mic was still pending.)
-        await Promise.race([
+await Promise.race([
           entry.salts,
           new Promise<void>(res => setTimeout(res, 5000)),
         ]).catch(() => {})
+        // The 5s races entry.salts, which resolves only after the pair's OWN
+        // mediaKeyFor + replaceTrack — a slow key exchange already sat through
+        // the whole answer-hold window and STILL leaves this sender trackless,
+        // which is exactly how `answer=recvonly mic=live` kept happening. Force
+        // the mic onto THIS sender right now, whatever the key did.
+        await this.ensureSenderTrack(entry, from)
         dbg('answering offer', { from, audioDirection: sdpAudioDir(entry.pc.localDescription?.sdp), audioHasTrack: !!entry.audioSender?.track, micTrackLive: this.micTrack?.readyState === 'live' })
         await entry.pc.setLocalDescription(await entry.pc.createAnswer())
         // Safari can still answer recvonly for the audio m-line despite a
